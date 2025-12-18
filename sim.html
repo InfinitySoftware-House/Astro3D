@@ -21,6 +21,39 @@
             user-select: none;
             max-width: 320px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            transition: opacity 0.3s, transform 0.3s;
+        }
+
+        #ui.hidden {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateX(-20px);
+        }
+
+        #uiToggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(10, 10, 10, 0.85);
+            border: 1px solid #333;
+            color: #00d2ff;
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            backdrop-filter: blur(8px);
+            transition: all 0.2s;
+            z-index: 1000;
+            width: auto;
+            margin-top: 0;
+        }
+
+        #uiToggle:hover {
+            background: #333;
+            border-color: #00d2ff;
         }
 
         h1 { margin: 0 0 5px 0; font-size: 1.1rem; color: #00d2ff; text-transform: uppercase; letter-spacing: 1px; }
@@ -129,6 +162,93 @@
             flex: 1;
             margin-top: 0;
         }
+
+        /* Settings modal */
+        #settingsModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1001;
+            justify-content: center;
+            align-items: center;
+            overflow-y: auto;
+        }
+
+        #settingsModal.active {
+            display: flex;
+        }
+
+        .modal-content.settings {
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-content .slider-group {
+            margin-bottom: 20px;
+        }
+
+        .modal-content input[type="range"] {
+            width: 100%;
+            accent-color: #00d2ff;
+            margin-bottom: 5px;
+        }
+
+        .modal-content .value-display {
+            color: #00d2ff;
+            font-family: monospace;
+            font-size: 0.9rem;
+            text-align: right;
+            margin-top: 5px;
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+
+        .toggle-group label {
+            margin-bottom: 0;
+            flex: 1;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 24px;
+            background: #333;
+            border-radius: 12px;
+            border: 1px solid #444;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: #00d2ff;
+            border-color: #00d2ff;
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #fff;
+            top: 2px;
+            left: 2px;
+            transition: all 0.3s;
+        }
+
+        .toggle-switch.active::after {
+            left: 28px;
+        }
     </style>
     
     <!-- Import Map for Modular Three.js -->
@@ -161,9 +281,17 @@
         <input type="range" id="speedRange" min="0" max="2" step="0.1" value="1">
     </div>
 
+    <div class="toggle-group">
+        <label>Show Grid</label>
+        <div class="toggle-switch" id="gridToggle"></div>
+    </div>
+
+    <button id="settingsBtn">Settings</button>
     <button id="resetBtn">Reset Simulation</button>
     <div id="warning">Hardware acceleration required.</div>
 </div>
+
+<button id="uiToggle">Hide UI</button>
 
 <!-- Modal for adding particles -->
 <div id="particleModal">
@@ -178,6 +306,53 @@
     </div>
 </div>
 
+<!-- Settings Modal -->
+<div id="settingsModal">
+    <div class="modal-content settings">
+        <h3>Simulation Settings</h3>
+        
+        <div class="slider-group">
+            <label>Time Speed: <span class="value-display" id="speedValue">1.0</span></label>
+            <input type="range" id="settingsSpeed" min="0" max="2" step="0.1" value="1">
+        </div>
+
+        <div class="slider-group">
+            <label>Gravity Constant (G): <span class="value-display" id="gravityValue">2.0</span></label>
+            <input type="range" id="settingsGravity" min="0.1" max="10" step="0.1" value="2.0">
+        </div>
+
+        <div class="slider-group">
+            <label>Softening: <span class="value-display" id="softeningValue">5.0</span></label>
+            <input type="range" id="settingsSoftening" min="0.1" max="20" step="0.5" value="5.0">
+        </div>
+
+        <div class="slider-group">
+            <label>Damping: <span class="value-display" id="dampingValue">0.9995</span></label>
+            <input type="range" id="settingsDamping" min="0.99" max="1.0" step="0.0001" value="0.9995">
+        </div>
+
+        <div class="slider-group">
+            <label>Max Velocity: <span class="value-display" id="maxVelValue">50.0</span></label>
+            <input type="range" id="settingsMaxVel" min="10" max="200" step="5" value="50.0">
+        </div>
+
+        <div class="slider-group">
+            <label>Bounds: <span class="value-display" id="boundsValue">2000</span></label>
+            <input type="range" id="settingsBounds" min="500" max="5000" step="100" value="2000">
+        </div>
+
+        <div class="slider-group">
+            <label>Particle Size Multiplier: <span class="value-display" id="particleSizeValue">5.5</span></label>
+            <input type="range" id="settingsParticleSize" min="1" max="20" step="0.5" value="5.5">
+        </div>
+
+        <div class="modal-buttons">
+            <button id="saveSettingsBtn">Save</button>
+            <button id="cancelSettingsBtn">Cancel</button>
+        </div>
+    </div>
+</div>
+
 <div id="canvas-container"></div>
 
 <script type="module">
@@ -185,10 +360,18 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
     // --- Configuration ---
-    const TEXTURE_WIDTH = 32; // 32x32 = 1024 particles
+    const TEXTURE_WIDTH = 64; // 32x32 = 1024 particles
     const PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
-    const BOUNDS = 2000;
-    const BOUNDS_HALF = BOUNDS / 2;
+    
+    // --- Configurable Parameters ---
+    let BOUNDS = 2000;
+    let BOUNDS_HALF = BOUNDS / 2;
+    let GRAVITY_CONSTANT = 2.0;
+    let SOFTENING = 5.0;
+    let DAMPING = 0.9995;
+    let MAX_VELOCITY = 50.0;
+    let PARTICLE_SIZE_MULT = 5.5;
+    let gridVisible = true;
 
     // --- State ---
     let scene, camera, renderer, controls;
@@ -231,14 +414,14 @@
     `;
 
     // 2. Position Fragment Shader (Integrator)
-    const fsPosition = `
+    function getFsPosition() {
+        return `
         uniform sampler2D texPos;
         uniform sampler2D texVel;
         uniform float delta;
+        uniform float bounds;
+        uniform float boundsHalf;
         varying vec2 vUv;
-
-        const float BOUNDS = ${BOUNDS.toFixed(1)};
-        const float BOUNDS_HALF = ${BOUNDS_HALF.toFixed(1)};
 
         void main() {
             vec4 pos = texture2D( texPos, vUv );
@@ -249,26 +432,30 @@
             
             // Keep particles within bounds (soft boundary)
             // Clamp to bounds to prevent particles from disappearing
-            pos.x = clamp(pos.x, -BOUNDS_HALF, BOUNDS_HALF);
-            pos.y = clamp(pos.y, -BOUNDS_HALF, BOUNDS_HALF);
-            pos.z = clamp(pos.z, -BOUNDS_HALF, BOUNDS_HALF);
+            pos.x = clamp(pos.x, -boundsHalf, boundsHalf);
+            pos.y = clamp(pos.y, -boundsHalf, boundsHalf);
+            pos.z = clamp(pos.z, -boundsHalf, boundsHalf);
             
             gl_FragColor = pos;
         }
     `;
+    }
 
     // 3. Velocity Fragment Shader (Gravity Physics - The Heavy Lifter)
-    const fsVelocity = `
+    function getFsVelocity() {
+        return `
         uniform sampler2D texPos;
         uniform sampler2D texVel;
         uniform float delta;
         uniform float time;
+        uniform float gravityConstant;
+        uniform float softening;
+        uniform float damping;
+        uniform float maxVelocity;
         varying vec2 vUv;
 
         const float width = ${TEXTURE_WIDTH.toFixed(1)};
         const float count = width * width;
-        const float G = 2.0; // Gravity Constant
-        const float softening = 5.0; // Prevent singularity
 
         void main() {
             vec4 myPos = texture2D( texPos, vUv );
@@ -294,7 +481,7 @@
                     // a = F / m1 = G * m2 / r^2
                     // We store mass in the w component of position
                     
-                    float f = (G * otherPos.w) / (distSq + softening);
+                    float f = (gravityConstant * otherPos.w) / (distSq + softening);
                     float dist = sqrt(distSq);
                     
                     // Safe normalize - avoid division by zero
@@ -306,23 +493,24 @@
             myVel.xyz += acc * delta;
             
             // Damping to prevent system from exploding
-            myVel.xyz *= 0.9995;
+            myVel.xyz *= damping;
             
             // Limit maximum velocity to prevent particles from moving too fast
-            float maxVel = 50.0;
             float velMag = length(myVel.xyz);
-            if (velMag > maxVel) {
-                myVel.xyz = normalize(myVel.xyz) * maxVel;
+            if (velMag > maxVelocity) {
+                myVel.xyz = normalize(myVel.xyz) * maxVelocity;
             }
 
             gl_FragColor = myVel;
         }
     `;
+    }
 
     // 4. Particle Vertex Shader (Visuals)
     const vsParticles = `
         uniform sampler2D texPos;
         uniform sampler2D texVel;
+        uniform float particleSizeMult;
         varying vec3 vColor;
         varying float vMass;
 
@@ -349,27 +537,32 @@
 
             // Size based on mass - ensure always visible
             float depth = max(-mvPosition.z, 0.1); // Clamp depth
-            gl_PointSize = max(mass * 5.5 * (300.0 / depth), 5.0); // Smaller particles, higher minimum
+            gl_PointSize = max(mass * particleSizeMult * (300.0 / depth), 5.0); // Smaller particles, higher minimum
             gl_PointSize = min(gl_PointSize, 100.0); // Cap maximum
         }
     `;
 
     // 5. Particle Fragment Shader
     const fsParticles = `
+        uniform float time;
         varying vec3 vColor;
         varying float vMass;
         void main() {
-            // Circular point
             vec2 cxy = 2.0 * gl_PointCoord - 1.0;
             float r = dot(cxy, cxy);
             if (r > 1.0) discard;
 
-            // Simple glow with brighter output
-            float alpha = 1.0 - r;
-            alpha = pow(alpha, 0.6); // Softer falloff for more visibility
-            // Make particles much brighter
-            vec3 finalColor = vColor * 1.5 + vec3(vMass * 0.2);
-            gl_FragColor = vec4( finalColor, alpha );
+            float glow = 1.0 - r;
+            float heat = clamp((vMass - 1.0) * 0.08, 0.0, 1.0);
+            float flicker = 0.85 + 0.15 * sin(time * 4.0 + vMass * 5.0);
+            float alpha = clamp(pow(glow, 1.1) * flicker, 0.0, 1.0);
+
+            vec3 warmTint = mix(vColor, vec3(1.0, 0.9, 0.7), heat * 0.6);
+            vec3 core = warmTint * (1.0 + heat * 0.3);
+            vec3 halo = vColor * glow * 0.6;
+            vec3 finalColor = (core + halo) * flicker;
+
+            gl_FragColor = vec4(finalColor * 1.2, alpha);
         }
     `;
 
@@ -378,6 +571,8 @@
         uniform sampler2D texPos;
         varying float vDepth;
         varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
 
         const float width = ${TEXTURE_WIDTH.toFixed(1)};
 
@@ -409,14 +604,22 @@
             vDepth = potential;
             newPos.y = potential;
 
-            gl_Position = projectionMatrix * modelViewMatrix * vec4( newPos, 1.0 );
+            vec4 mvPosition = modelViewMatrix * vec4( newPos, 1.0 );
+            vNormal = vec3(0.0, 1.0, 0.0);
+            vViewPosition = -mvPosition.xyz;
+            gl_Position = projectionMatrix * mvPosition;
         }
     `;
 
     // 7. Grid Fragment Shader
     const fsGrid = `
+        uniform vec3 lightDir;
+        uniform vec3 lightColor;
+        uniform float ambientIntensity;
         varying float vDepth;
         varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
         
         void main() {
             // Color based on depth (strain)
@@ -424,7 +627,19 @@
             vec3 colorDeep = vec3(0.0, 0.8, 1.0);
             
             float mixVal = smoothstep(0.0, -50.0, vDepth);
-            vec3 col = mix(colorFlat, colorDeep, mixVal);
+            vec3 baseColor = mix(colorFlat, colorDeep, mixVal);
+
+            vec3 normal = normalize(vNormal);
+            vec3 lightDirection = normalize(lightDir);
+            float diff = max(dot(normal, lightDirection), 0.0);
+            vec3 diffuse = lightColor * diff;
+            vec3 ambient = vec3(0.08) + lightColor * ambientIntensity;
+            vec3 viewDir = normalize(vViewPosition);
+            vec3 reflectDir = reflect(-lightDirection, normal);
+            float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+            vec3 specular = vec3(1.0) * spec * 0.35;
+            vec3 litColor = baseColor * (ambient + diffuse * 0.9) + specular;
+            vec3 col = mix(baseColor, litColor, 0.65);
             
             // Grid lines
             // Simple analytical grid
@@ -435,7 +650,8 @@
 
             if(lineAlpha < 0.1) discard;
 
-            gl_FragColor = vec4(col, 0.4 * lineAlpha);
+            float alpha = clamp(0.35 * lineAlpha + mixVal * 0.12, 0.0, 0.55);
+            gl_FragColor = vec4(col, alpha);
         }
     `;
 
@@ -454,6 +670,27 @@
         }
     `;
 
+    function createGlowTexture(size = 128) {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const gradient = ctx.createRadialGradient(
+            size / 2, size / 2, 0,
+            size / 2, size / 2, size / 2
+        );
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+        gradient.addColorStop(0.15, 'rgba(255, 255, 255, 0.9)');
+        gradient.addColorStop(0.35, 'rgba(255, 255, 255, 0.7)');
+        gradient.addColorStop(1, 'rgba(204, 232, 255, 0.0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.needsUpdate = true;
+        return texture;
+    }
+
 
     function init() {
         // --- Basic Setup ---
@@ -464,6 +701,10 @@
         });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        renderer.physicallyCorrectLights = true;
         
         // Check for required WebGL features
         const gl = renderer.getContext();
@@ -483,6 +724,54 @@
 
         scene = new THREE.Scene();
         // scene.fog = new THREE.FogExp2(0x050505, 0.001);
+
+        const gridLightDir = new THREE.Vector3(0.45, 0.78, 0.4).normalize();
+        const gridLightColor = new THREE.Color(0xfff4dd);
+
+        const directionalLight = new THREE.DirectionalLight(gridLightColor, 1.35);
+        directionalLight.position.copy(gridLightDir.clone().multiplyScalar(220));
+        directionalLight.target.position.set(0, 0, 0);
+        scene.add(directionalLight);
+        scene.add(directionalLight.target);
+
+        const hemisphereLight = new THREE.HemisphereLight(0x8899ff, 0x03010a, 0.45);
+        scene.add(hemisphereLight);
+
+        const fillLight = new THREE.PointLight(0x4aa8ff, 0.9, 0, 2);
+        fillLight.position.set(-90, 40, -150);
+        scene.add(fillLight);
+
+        const coreGlow = new THREE.PointLight(0xffe4aa, 0.35, 600, 2);
+        coreGlow.position.set(0, 60, 0);
+        scene.add(coreGlow);
+
+        // Subtle starfield backdrop for depth
+        const starCount = 1500;
+        const starGeo = new THREE.BufferGeometry();
+        const starPositions = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+            const distance = 800 + Math.random() * 1200;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            starPositions[i * 3 + 0] = distance * Math.sin(phi) * Math.cos(theta);
+            starPositions[i * 3 + 1] = distance * Math.sin(phi) * Math.sin(theta);
+            starPositions[i * 3 + 2] = distance * Math.cos(phi);
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starTexture = createGlowTexture(128);
+        const starMaterial = new THREE.PointsMaterial({
+            map: starTexture,
+            color: 0xffffff,
+            size: 0.8,
+            transparent: true,
+            opacity: 0.92,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true,
+            alphaTest: 0.02
+        });
+        const starField = new THREE.Points(starGeo, starMaterial);
+        scene.add(starField);
 
         camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
         camera.position.set(0, 100, 250);
@@ -515,10 +804,12 @@
             uniforms: {
                 texPos: { value: null },
                 texVel: { value: null },
-                delta: { value: 0.0 }
+                delta: { value: 0.0 },
+                bounds: { value: BOUNDS },
+                boundsHalf: { value: BOUNDS_HALF }
             },
             vertexShader: vsFBO,
-            fragmentShader: fsPosition
+            fragmentShader: getFsPosition()
         });
 
         matVel = new THREE.ShaderMaterial({
@@ -526,10 +817,14 @@
                 texPos: { value: null },
                 texVel: { value: null },
                 delta: { value: 0.0 },
-                time: { value: 0.0 }
+                time: { value: 0.0 },
+                gravityConstant: { value: GRAVITY_CONSTANT },
+                softening: { value: SOFTENING },
+                damping: { value: DAMPING },
+                maxVelocity: { value: MAX_VELOCITY }
             },
             vertexShader: vsFBO,
-            fragmentShader: fsVelocity
+            fragmentShader: getFsVelocity()
         });
 
         meshPos = new THREE.Mesh(geometryFBO, matPos);
@@ -578,7 +873,9 @@
 
         particleUniforms = {
             texPos: { value: null },
-            texVel: { value: null }
+            texVel: { value: null },
+            time: { value: 0.0 },
+            particleSizeMult: { value: PARTICLE_SIZE_MULT }
         };
 
         materialParticles = new THREE.ShaderMaterial({
@@ -598,6 +895,7 @@
         // Initialize uniforms with initial textures
         particleUniforms.texPos.value = rtPosition1.texture;
         particleUniforms.texVel.value = rtVelocity1.texture;
+        particleUniforms.time.value = performance.now() * 0.001;
         
         console.log("Particle system initialized:", PARTICLES, "particles");
         console.log("Position RT:", rtPosition1, "Texture:", rtPosition1.texture);
@@ -617,7 +915,10 @@
         gridGeo.rotateX(-Math.PI / 2);
         
         gridUniforms = {
-            texPos: { value: null }
+            texPos: { value: null },
+            lightDir: { value: gridLightDir.clone() },
+            lightColor: { value: gridLightColor.clone() },
+            ambientIntensity: { value: 0.28 }
         };
 
         const materialGrid = new THREE.ShaderMaterial({
@@ -639,8 +940,129 @@
         
         // Click handler for adding particles
         setupParticleClickHandler();
+        
+        // Setup UI handlers
+        setupUIHandlers();
 
         animate();
+    }
+
+    function setupUIHandlers() {
+        // Grid toggle
+        const gridToggle = document.getElementById('gridToggle');
+        gridToggle.classList.add('active'); // Grid is visible by default
+        gridToggle.addEventListener('click', () => {
+            gridVisible = !gridVisible;
+            gridMesh.visible = gridVisible;
+            gridToggle.classList.toggle('active');
+        });
+
+        // UI toggle
+        const uiToggle = document.getElementById('uiToggle');
+        const ui = document.getElementById('ui');
+        let uiVisible = true;
+        uiToggle.addEventListener('click', () => {
+            uiVisible = !uiVisible;
+            if (uiVisible) {
+                ui.classList.remove('hidden');
+                uiToggle.textContent = 'Hide UI';
+            } else {
+                ui.classList.add('hidden');
+                uiToggle.textContent = 'Show UI';
+            }
+        });
+
+        // Settings modal
+        const settingsModal = document.getElementById('settingsModal');
+        const settingsBtn = document.getElementById('settingsBtn');
+        const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+        const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
+
+        // Load current values into settings modal
+        function loadSettingsToModal() {
+            document.getElementById('settingsSpeed').value = speed;
+            document.getElementById('settingsGravity').value = GRAVITY_CONSTANT;
+            document.getElementById('settingsSoftening').value = SOFTENING;
+            document.getElementById('settingsDamping').value = DAMPING;
+            document.getElementById('settingsMaxVel').value = MAX_VELOCITY;
+            document.getElementById('settingsBounds').value = BOUNDS;
+            document.getElementById('settingsParticleSize').value = PARTICLE_SIZE_MULT;
+            updateSettingsDisplay();
+        }
+
+        // Update value displays
+        function updateSettingsDisplay() {
+            document.getElementById('speedValue').textContent = parseFloat(document.getElementById('settingsSpeed').value).toFixed(1);
+            document.getElementById('gravityValue').textContent = parseFloat(document.getElementById('settingsGravity').value).toFixed(1);
+            document.getElementById('softeningValue').textContent = parseFloat(document.getElementById('settingsSoftening').value).toFixed(1);
+            document.getElementById('dampingValue').textContent = parseFloat(document.getElementById('settingsDamping').value).toFixed(4);
+            document.getElementById('maxVelValue').textContent = parseFloat(document.getElementById('settingsMaxVel').value).toFixed(1);
+            document.getElementById('boundsValue').textContent = parseFloat(document.getElementById('settingsBounds').value).toFixed(0);
+            document.getElementById('particleSizeValue').textContent = parseFloat(document.getElementById('settingsParticleSize').value).toFixed(1);
+        }
+
+        // Update shaders when parameters change
+        function updateShaders() {
+            // Update position shader
+            matPos.fragmentShader = getFsPosition();
+            matPos.uniforms.bounds.value = BOUNDS;
+            matPos.uniforms.boundsHalf.value = BOUNDS_HALF;
+            matPos.needsUpdate = true;
+
+            // Update velocity shader
+            matVel.fragmentShader = getFsVelocity();
+            matVel.uniforms.gravityConstant.value = GRAVITY_CONSTANT;
+            matVel.uniforms.softening.value = SOFTENING;
+            matVel.uniforms.damping.value = DAMPING;
+            matVel.uniforms.maxVelocity.value = MAX_VELOCITY;
+            matVel.needsUpdate = true;
+
+            // Update particle material
+            particleUniforms.particleSizeMult.value = PARTICLE_SIZE_MULT;
+        }
+
+        // Settings sliders update display
+        ['settingsSpeed', 'settingsGravity', 'settingsSoftening', 'settingsDamping', 'settingsMaxVel', 'settingsBounds', 'settingsParticleSize'].forEach(id => {
+            document.getElementById(id).addEventListener('input', updateSettingsDisplay);
+        });
+
+        // Open settings modal
+        settingsBtn.addEventListener('click', () => {
+            loadSettingsToModal();
+            settingsModal.classList.add('active');
+        });
+
+        // Save settings
+        saveSettingsBtn.addEventListener('click', () => {
+            speed = parseFloat(document.getElementById('settingsSpeed').value);
+            GRAVITY_CONSTANT = parseFloat(document.getElementById('settingsGravity').value);
+            SOFTENING = parseFloat(document.getElementById('settingsSoftening').value);
+            DAMPING = parseFloat(document.getElementById('settingsDamping').value);
+            MAX_VELOCITY = parseFloat(document.getElementById('settingsMaxVel').value);
+            BOUNDS = parseFloat(document.getElementById('settingsBounds').value);
+            BOUNDS_HALF = BOUNDS / 2;
+            PARTICLE_SIZE_MULT = parseFloat(document.getElementById('settingsParticleSize').value);
+
+            // Update UI slider
+            document.getElementById('speedRange').value = speed;
+
+            // Update shaders
+            updateShaders();
+
+            settingsModal.classList.remove('active');
+        });
+
+        // Cancel settings
+        cancelSettingsBtn.addEventListener('click', () => {
+            settingsModal.classList.remove('active');
+        });
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && settingsModal.classList.contains('active')) {
+                settingsModal.classList.remove('active');
+            }
+        });
     }
 
     function createRenderTarget(initialData) {
@@ -691,7 +1113,7 @@
             const v = Math.random();
             const theta = 2 * Math.PI * u;
             const phi = Math.acos(2 * v - 1);
-            const r = Math.cbrt(Math.random()) * 150; // Spread radius
+            const r = Math.cbrt(Math.random()) * 400; // Spread radius
             
             // Flatten slightly to make a disk
             let x = r * Math.sin(phi) * Math.cos(theta);
@@ -980,6 +1402,7 @@
         // Always update textures after buffer swap to ensure we're reading from the correct buffer
         particleUniforms.texPos.value = rtPosition1.texture;
         particleUniforms.texVel.value = rtVelocity1.texture;
+        particleUniforms.time.value = performance.now() * 0.001;
         gridUniforms.texPos.value = rtPosition1.texture;
         
         // Force uniforms update every frame to ensure textures are current
