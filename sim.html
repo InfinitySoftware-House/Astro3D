@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPU N-Body Gravity</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; font-family: 'Segoe UI', sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #eee;
+            background: rgba(10, 10, 10, 0.85);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            backdrop-filter: blur(8px);
+            user-select: none;
+            max-width: 320px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        h1 { margin: 0 0 5px 0; font-size: 1.1rem; color: #00d2ff; text-transform: uppercase; letter-spacing: 1px; }
+        h2 { margin: 0 0 15px 0; font-size: 0.8rem; color: #888; font-weight: normal; }
+        p { font-size: 0.85rem; color: #bbb; margin-bottom: 15px; line-height: 1.4; }
+        
+        .stat-row { display: flex; justify-content: space-between; font-size: 0.8rem; color: #888; margin-bottom: 5px; }
+        .stat-val { color: #fff; font-family: monospace; }
+
+        button {
+            background: #222;
+            border: 1px solid #444;
+            color: #00d2ff;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            width: 100%;
+            margin-top: 10px;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+        }
+        button:hover { background: #333; border-color: #00d2ff; }
+        button:active { background: #00d2ff; color: #000; }
+
+        .slider-group { margin-top: 15px; }
+        label { display: block; font-size: 0.75rem; margin-bottom: 5px; color: #aaa; }
+        input[type="range"] { width: 100%; accent-color: #00d2ff; }
+
+        #warning {
+            color: #ffaa00;
+            font-size: 0.7rem;
+            margin-top: 10px;
+            display: none;
+        }
+
+        /* Modal for adding particles */
+        #particleModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #particleModal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: rgba(10, 10, 10, 0.95);
+            border: 1px solid #00d2ff;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 400px;
+            width: 90%;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 20px rgba(0, 210, 255, 0.3);
+        }
+
+        .modal-content h3 {
+            margin: 0 0 20px 0;
+            color: #00d2ff;
+            font-size: 1.2rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .modal-content label {
+            display: block;
+            color: #aaa;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+
+        .modal-content input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            background: #222;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 1rem;
+            box-sizing: border-box;
+            margin-bottom: 20px;
+        }
+
+        .modal-content input[type="number"]:focus {
+            outline: none;
+            border-color: #00d2ff;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .modal-buttons button {
+            flex: 1;
+            margin-top: 0;
+        }
+    </style>
+    
+    <!-- Import Map for Modular Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+<div id="ui">
+    <h1>GPU Gravity Engine</h1>
+    <h2>N-Body Particle Simulation</h2>
+    
+    <div class="stat-row">
+        <span>Particles:</span>
+        <span class="stat-val">1024</span>
+    </div>
+    <div class="stat-row">
+        <span>Calculations/Frame:</span>
+        <span class="stat-val">~1.05 Million</span>
+    </div>
+
+    <div class="slider-group">
+        <label>Time Speed</label>
+        <input type="range" id="speedRange" min="0" max="2" step="0.1" value="1">
+    </div>
+
+    <button id="resetBtn">Reset Simulation</button>
+    <div id="warning">Hardware acceleration required.</div>
+</div>
+
+<!-- Modal for adding particles -->
+<div id="particleModal">
+    <div class="modal-content">
+        <h3>Add Particle</h3>
+        <label for="particleMass">Mass:</label>
+        <input type="number" id="particleMass" min="0.1" step="0.1" value="1.0">
+        <div class="modal-buttons">
+            <button id="addParticleBtn">Add</button>
+            <button id="cancelParticleBtn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div id="canvas-container"></div>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // --- Configuration ---
+    const TEXTURE_WIDTH = 32; // 32x32 = 1024 particles
+    const PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
+    const BOUNDS = 2000;
+    const BOUNDS_HALF = BOUNDS / 2;
+
+    // --- State ---
+    let scene, camera, renderer, controls;
+    let time = 0;
+    let speed = 1.0;
+
+    // --- GPU Compute Variables ---
+    let gpuCompute;
+    let velocityVariable;
+    let positionVariable;
+    let positionUniforms;
+    let velocityUniforms;
+    
+    // Custom FBO helper since GPUComputationRenderer is hard to bundle in one file cleanly without full imports
+    // We will implement a raw Double-Buffer FBO approach
+    let sceneFBO, cameraFBO;
+    let rtPosition1, rtPosition2;
+    let rtVelocity1, rtVelocity2;
+    let meshPos, meshVel;
+    let matPos, matVel;
+
+    // Visuals
+    let particleMesh, gridMesh;
+    let particleUniforms, gridUniforms;
+    let materialParticles;
+    let particleMasses;
+
+    // GPU-side single-texel update helper (avoid CPU readPixels roundtrip)
+    let sceneInject, meshInject, matInject;
+
+    // --- Shaders ---
+
+    // 1. Vertex Shader (Pass-through for FBO quad)
+    const vsFBO = `
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+        }
+    `;
+
+    // 2. Position Fragment Shader (Integrator)
+    const fsPosition = `
+        uniform sampler2D texPos;
+        uniform sampler2D texVel;
+        uniform float delta;
+        varying vec2 vUv;
+
+        const float BOUNDS = ${BOUNDS.toFixed(1)};
+        const float BOUNDS_HALF = ${BOUNDS_HALF.toFixed(1)};
+
+        void main() {
+            vec4 pos = texture2D( texPos, vUv );
+            vec4 vel = texture2D( texVel, vUv );
+            
+            // Update Position: p = p + v * dt
+            pos.xyz += vel.xyz * delta;
+            
+            // Keep particles within bounds (soft boundary)
+            // Clamp to bounds to prevent particles from disappearing
+            pos.x = clamp(pos.x, -BOUNDS_HALF, BOUNDS_HALF);
+            pos.y = clamp(pos.y, -BOUNDS_HALF, BOUNDS_HALF);
+            pos.z = clamp(pos.z, -BOUNDS_HALF, BOUNDS_HALF);
+            
+            gl_FragColor = pos;
+        }
+    `;
+
+    // 3. Velocity Fragment Shader (Gravity Physics - The Heavy Lifter)
+    const fsVelocity = `
+        uniform sampler2D texPos;
+        uniform sampler2D texVel;
+        uniform float delta;
+        uniform float time;
+        varying vec2 vUv;
+
+        const float width = ${TEXTURE_WIDTH.toFixed(1)};
+        const float count = width * width;
+        const float G = 2.0; // Gravity Constant
+        const float softening = 5.0; // Prevent singularity
+
+        void main() {
+            vec4 myPos = texture2D( texPos, vUv );
+            vec4 myVel = texture2D( texVel, vUv );
+            
+            vec3 acc = vec3(0.0);
+            
+            // Loop through ALL other particles
+            // In a fragment shader, this loop runs in parallel for every pixel
+            for (float y = 0.0; y < width; y++) {
+                for (float x = 0.0; x < width; x++) {
+                    
+                    vec2 refUv = vec2(x + 0.5, y + 0.5) / width;
+                    vec4 otherPos = texture2D( texPos, refUv );
+                    
+                    vec3 dir = otherPos.xyz - myPos.xyz;
+                    float distSq = dot(dir, dir);
+                    
+                    // Skip self-interaction (when distance is very small)
+                    if (distSq < 0.01) continue;
+                    
+                    // F = G * m1 * m2 / r^2
+                    // a = F / m1 = G * m2 / r^2
+                    // We store mass in the w component of position
+                    
+                    float f = (G * otherPos.w) / (distSq + softening);
+                    float dist = sqrt(distSq);
+                    
+                    // Safe normalize - avoid division by zero
+                    acc += (dir / dist) * f;
+                }
+            }
+
+            // Apply acceleration
+            myVel.xyz += acc * delta;
+            
+            // Damping to prevent system from exploding
+            myVel.xyz *= 0.9995;
+            
+            // Limit maximum velocity to prevent particles from moving too fast
+            float maxVel = 50.0;
+            float velMag = length(myVel.xyz);
+            if (velMag > maxVel) {
+                myVel.xyz = normalize(myVel.xyz) * maxVel;
+            }
+
+            gl_FragColor = myVel;
+        }
+    `;
+
+    // 4. Particle Vertex Shader (Visuals)
+    const vsParticles = `
+        uniform sampler2D texPos;
+        uniform sampler2D texVel;
+        varying vec3 vColor;
+        varying float vMass;
+
+        void main() {
+            // Read position from texture based on uv coordinate
+            // We use the 'position' attribute of the buffer geometry as the UV lookup
+            vec2 uv = position.xy;
+            vec4 posData = texture2D( texPos, uv );
+            vec4 velData = texture2D( texVel, uv );
+
+            vec3 pos = posData.xyz;
+            float mass = max(posData.w, 1.0); // Ensure minimum mass
+            vMass = mass;
+
+            // Color based on velocity - make it always visible
+            float speed = length(velData.xyz);
+            vec3 colorCold = vec3(0.3, 0.6, 1.0);
+            vec3 colorHot = vec3(1.0, 0.6, 0.3);
+            vColor = mix(colorCold, colorHot, min(speed * 0.1, 1.0)) * 2.0; // Even brighter
+
+            // Calculate View Position
+            vec4 mvPosition = modelViewMatrix * vec4( pos, 1.0 );
+            gl_Position = projectionMatrix * mvPosition;
+
+            // Size based on mass - ensure always visible
+            float depth = max(-mvPosition.z, 0.1); // Clamp depth
+            gl_PointSize = max(mass * 5.5 * (300.0 / depth), 5.0); // Smaller particles, higher minimum
+            gl_PointSize = min(gl_PointSize, 100.0); // Cap maximum
+        }
+    `;
+
+    // 5. Particle Fragment Shader
+    const fsParticles = `
+        varying vec3 vColor;
+        varying float vMass;
+        void main() {
+            // Circular point
+            vec2 cxy = 2.0 * gl_PointCoord - 1.0;
+            float r = dot(cxy, cxy);
+            if (r > 1.0) discard;
+
+            // Simple glow with brighter output
+            float alpha = 1.0 - r;
+            alpha = pow(alpha, 0.6); // Softer falloff for more visibility
+            // Make particles much brighter
+            vec3 finalColor = vColor * 1.5 + vec3(vMass * 0.2);
+            gl_FragColor = vec4( finalColor, alpha );
+        }
+    `;
+
+    // 6. Grid Vertex Shader (Spacetime warping)
+    const vsGrid = `
+        uniform sampler2D texPos;
+        varying float vDepth;
+        varying vec2 vUv;
+
+        const float width = ${TEXTURE_WIDTH.toFixed(1)};
+
+        void main() {
+            vUv = uv;
+            vec3 newPos = position;
+            
+            // Calculate potential at this grid vertex
+            // We loop through particles again. 
+            // Note: Doing this 1024 times per vertex for a high-res grid is heavy.
+            // Modern GPUs can handle it, but we keep grid resolution reasonable.
+            
+            float potential = 0.0;
+            
+            for (float y = 0.0; y < width; y++) {
+                for (float x = 0.0; x < width; x++) {
+                    vec2 refUv = vec2(x + 0.5, y + 0.5) / width;
+                    vec4 pPos = texture2D( texPos, refUv );
+                    
+                    float d = distance(newPos.xz, pPos.xz);
+                    // Gravity Well formula
+                    // z = - Sum( Mass / Distance )
+                    potential -= (pPos.w * 8.0) / (d + 10.0);
+                }
+            }
+            
+            // Allow grid to go to very negative values (approaching -int64)
+            // No cap - let it go as deep as needed
+            vDepth = potential;
+            newPos.y = potential;
+
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( newPos, 1.0 );
+        }
+    `;
+
+    // 7. Grid Fragment Shader
+    const fsGrid = `
+        varying float vDepth;
+        varying vec2 vUv;
+        
+        void main() {
+            // Color based on depth (strain)
+            vec3 colorFlat = vec3(0.1, 0.1, 0.15);
+            vec3 colorDeep = vec3(0.0, 0.8, 1.0);
+            
+            float mixVal = smoothstep(0.0, -50.0, vDepth);
+            vec3 col = mix(colorFlat, colorDeep, mixVal);
+            
+            // Grid lines
+            // Simple analytical grid
+            float scale = 160.0;
+            vec2 grid = abs(fract(vUv * scale - 0.5) - 0.5) / fwidth(vUv * scale);
+            float line = min(grid.x, grid.y);
+            float lineAlpha = 1.0 - min(line, 1.0);
+
+            if(lineAlpha < 0.1) discard;
+
+            gl_FragColor = vec4(col, 0.4 * lineAlpha);
+        }
+    `;
+
+    // Single-texel overwrite shader (used to inject a new particle into the simulation textures)
+    const fsInjectTexel = `
+        uniform sampler2D texIn;
+        uniform vec2 targetCoord; // integer texel coord: (col, row)
+        uniform vec4 newValue;
+        varying vec2 vUv;
+
+        void main() {
+            vec4 current = texture2D(texIn, vUv);
+            vec2 fragCoord = floor(gl_FragCoord.xy); // 0..width-1
+            float isTarget = 1.0 - step(0.5, length(fragCoord - targetCoord));
+            gl_FragColor = mix(current, newValue, isTarget);
+        }
+    `;
+
+
+    function init() {
+        // --- Basic Setup ---
+        const container = document.getElementById('canvas-container');
+        renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            powerPreference: "high-performance"
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        
+        // Check for required WebGL features
+        const gl = renderer.getContext();
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+            console.log('GPU:', gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
+        }
+        
+        if(!renderer.capabilities.floatFragmentTextures) {
+            document.getElementById('warning').style.display = 'block';
+            document.getElementById('warning').innerText = "Error: OES_texture_float not supported on this device.";
+            console.error("Float textures not supported!");
+        } else {
+            console.log("Float textures supported:", renderer.capabilities.floatFragmentTextures);
+        }
+        container.appendChild(renderer.domElement);
+
+        scene = new THREE.Scene();
+        // scene.fog = new THREE.FogExp2(0x050505, 0.001);
+
+        camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
+        camera.position.set(0, 100, 250);
+        camera.lookAt(0, 0, 0);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // --- FBO Setup (The GPU Computer) ---
+        sceneFBO = new THREE.Scene();
+        cameraFBO = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        
+        // Initial Data
+        const initialPos = getInitialPositions();
+        const initialVel = getInitialVelocities(initialPos);
+        particleMasses = new Float32Array(PARTICLES);
+        for (let i = 0; i < PARTICLES; i++) particleMasses[i] = initialPos[i * 4 + 3];
+
+        // Render Targets (Double Buffered)
+        rtPosition1 = createRenderTarget(initialPos);
+        rtPosition2 = createRenderTarget(initialPos);
+        rtVelocity1 = createRenderTarget(initialVel);
+        rtVelocity2 = createRenderTarget(initialVel);
+
+        // FBO Geometry (Full screen quad)
+        const geometryFBO = new THREE.PlaneGeometry(2, 2);
+
+        // Simulation Materials
+        matPos = new THREE.ShaderMaterial({
+            uniforms: {
+                texPos: { value: null },
+                texVel: { value: null },
+                delta: { value: 0.0 }
+            },
+            vertexShader: vsFBO,
+            fragmentShader: fsPosition
+        });
+
+        matVel = new THREE.ShaderMaterial({
+            uniforms: {
+                texPos: { value: null },
+                texVel: { value: null },
+                delta: { value: 0.0 },
+                time: { value: 0.0 }
+            },
+            vertexShader: vsFBO,
+            fragmentShader: fsVelocity
+        });
+
+        meshPos = new THREE.Mesh(geometryFBO, matPos);
+        meshVel = new THREE.Mesh(geometryFBO, matVel);
+        sceneFBO.add(meshPos);
+        sceneFBO.add(meshVel);
+
+        // GPU-side inject (single texel overwrite) scene
+        sceneInject = new THREE.Scene();
+        matInject = new THREE.ShaderMaterial({
+            uniforms: {
+                texIn: { value: null },
+                targetCoord: { value: new THREE.Vector2(0, 0) },
+                newValue: { value: new THREE.Vector4(0, 0, 0, 0) }
+            },
+            vertexShader: vsFBO,
+            fragmentShader: fsInjectTexel
+        });
+        meshInject = new THREE.Mesh(geometryFBO, matInject);
+        sceneInject.add(meshInject);
+
+
+        // --- Visual Scene Setup ---
+
+        // 1. Particles System
+        // We use a BufferGeometry where 'position' attribute actually stores UV coordinates
+        // to look up real positions in the texture.
+        const particlesGeo = new THREE.BufferGeometry();
+        const particleUvs = new Float32Array(PARTICLES * 3);
+        
+        for (let i = 0; i < PARTICLES; i++) {
+            // Map index to 0..1 UV space (center of each texel)
+            const col = i % TEXTURE_WIDTH;
+            const row = Math.floor(i / TEXTURE_WIDTH);
+            const x = (col + 0.5) / TEXTURE_WIDTH;
+            const y = (row + 0.5) / TEXTURE_WIDTH;
+            
+            particleUvs[i * 3] = x;
+            particleUvs[i * 3 + 1] = y;
+            particleUvs[i * 3 + 2] = 0;
+        }
+        
+        console.log("Sample UVs:", particleUvs[0], particleUvs[1], particleUvs[2]);
+        console.log("Last UVs:", particleUvs[(PARTICLES-1)*3], particleUvs[(PARTICLES-1)*3+1], particleUvs[(PARTICLES-1)*3+2]);
+        particlesGeo.setAttribute('position', new THREE.BufferAttribute(particleUvs, 3));
+
+        particleUniforms = {
+            texPos: { value: null },
+            texVel: { value: null }
+        };
+
+        materialParticles = new THREE.ShaderMaterial({
+            uniforms: particleUniforms,
+            vertexShader: vsParticles,
+            fragmentShader: fsParticles,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            depthTest: true,
+            vertexColors: false
+        });
+
+        particleMesh = new THREE.Points(particlesGeo, materialParticles);
+        scene.add(particleMesh);
+        
+        // Initialize uniforms with initial textures
+        particleUniforms.texPos.value = rtPosition1.texture;
+        particleUniforms.texVel.value = rtVelocity1.texture;
+        
+        console.log("Particle system initialized:", PARTICLES, "particles");
+        console.log("Position RT:", rtPosition1, "Texture:", rtPosition1.texture);
+        console.log("Velocity RT:", rtVelocity1, "Texture:", rtVelocity1.texture);
+        
+        // Verify texture is valid
+        if (!rtPosition1.texture) {
+            console.error("ERROR: Position texture is null!");
+        }
+        if (!rtVelocity1.texture) {
+            console.error("ERROR: Velocity texture is null!");
+        }
+
+        // 2. Spacetime Grid
+        // A high res plane
+        const gridGeo = new THREE.PlaneGeometry(1000, 1000, 100, 100);
+        gridGeo.rotateX(-Math.PI / 2);
+        
+        gridUniforms = {
+            texPos: { value: null }
+        };
+
+        const materialGrid = new THREE.ShaderMaterial({
+            uniforms: gridUniforms,
+            vertexShader: vsGrid,
+            fragmentShader: fsGrid,
+            transparent: true,
+            wireframe: false,
+            side: THREE.DoubleSide
+        });
+
+        gridMesh = new THREE.Mesh(gridGeo, materialGrid);
+        scene.add(gridMesh);
+
+        // Events
+        window.addEventListener('resize', onWindowResize);
+        document.getElementById('speedRange').addEventListener('input', e => speed = parseFloat(e.target.value));
+        document.getElementById('resetBtn').addEventListener('click', resetSimulation);
+        
+        // Click handler for adding particles
+        setupParticleClickHandler();
+
+        animate();
+    }
+
+    function createRenderTarget(initialData) {
+        const rt = new THREE.WebGLRenderTarget(TEXTURE_WIDTH, TEXTURE_WIDTH, {
+            wrapS: THREE.ClampToEdgeWrapping,
+            wrapT: THREE.ClampToEdgeWrapping,
+            minFilter: THREE.NearestFilter,
+            magFilter: THREE.NearestFilter,
+            format: THREE.RGBAFormat,
+            type: THREE.FloatType, // Crucial for storing physics data
+            generateMipmaps: false
+        });
+        
+        // Fill with initial data
+        const texture = new THREE.DataTexture(initialData, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
+        texture.needsUpdate = true;
+        texture.flipY = false; // Important for render targets
+        
+        // We render the initial data into the target once
+        const tempMat = new THREE.MeshBasicMaterial({ map: texture });
+        const tempMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), tempMat);
+        const tempScene = new THREE.Scene();
+        tempScene.add(tempMesh);
+        
+        // Ensure renderer is ready
+        renderer.setRenderTarget(rt);
+        renderer.clear();
+        renderer.render(tempScene, cameraFBO);
+        renderer.setRenderTarget(null);
+        
+        // Verify data was written (check first few values)
+        if (initialData.length > 0) {
+            console.log("Render target created. Sample data:", 
+                initialData[0], initialData[1], initialData[2], initialData[3]);
+        }
+        
+        return rt;
+    }
+
+    // --- Initialization Logic ---
+
+    function getInitialPositions() {
+        const data = new Float32Array(PARTICLES * 4);
+        for (let i = 0; i < PARTICLES; i++) {
+            // Galaxy Cloud Distribution
+            // Random point in sphere
+            const u = Math.random();
+            const v = Math.random();
+            const theta = 2 * Math.PI * u;
+            const phi = Math.acos(2 * v - 1);
+            const r = Math.cbrt(Math.random()) * 150; // Spread radius
+            
+            // Flatten slightly to make a disk
+            let x = r * Math.sin(phi) * Math.cos(theta);
+            let y = (r * Math.sin(phi) * Math.sin(theta)) * 0.1; // Flattened
+            let z = r * Math.cos(phi);
+
+            data[i * 4 + 0] = x;
+            data[i * 4 + 1] = y;
+            data[i * 4 + 2] = z;
+            
+            // Random Mass (heavier ones are rarer)
+            let mass = 1.0 + Math.random() * Math.random() * 10.0;
+            // Make a few random super-heavy bodies
+            if (Math.random() < 0.01) mass *= 8.0;
+
+            data[i * 4 + 3] = mass;
+        }
+        return data;
+    }
+
+    function getInitialVelocities(posData) {
+        const data = new Float32Array(PARTICLES * 4);
+        for (let i = 0; i < PARTICLES; i++) {
+            const x = posData[i*4];
+            const y = posData[i*4+1];
+            const z = posData[i*4+2];
+            const dist = Math.sqrt(x*x + y*y + z*z);
+
+            // Give them rotational velocity around Y axis to create a galaxy
+            // v = Cross(up, pos)
+            const vScale = 0.5; // Arbitrary orbital speed constant
+            
+            data[i * 4 + 0] = z * vScale * 0.1; // Tangent approx
+            data[i * 4 + 1] = 0;
+            data[i * 4 + 2] = -x * vScale * 0.1;
+            
+            // Add randomness
+            data[i * 4 + 0] += (Math.random() - 0.5) * 5.0;
+            data[i * 4 + 1] += (Math.random() - 0.5) * 2.0;
+            data[i * 4 + 2] += (Math.random() - 0.5) * 5.0;
+            
+            data[i * 4 + 3] = 0; // w unused for velocity
+        }
+        return data;
+    }
+
+    function resetSimulation() {
+        const p = getInitialPositions();
+        const v = getInitialVelocities(p);
+        for (let i = 0; i < PARTICLES; i++) particleMasses[i] = p[i * 4 + 3];
+        
+        // Re-render initial data to buffers
+        const rt1 = createRenderTarget(p);
+        const rt2 = createRenderTarget(v);
+        
+        // Copy to main
+        const quad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), new THREE.MeshBasicMaterial());
+        const sc = new THREE.Scene(); sc.add(quad);
+        
+        // Reset positions
+        quad.material.map = rt1.texture;
+        renderer.setRenderTarget(rtPosition1); renderer.render(sc, cameraFBO);
+        renderer.setRenderTarget(rtPosition2); renderer.render(sc, cameraFBO);
+        
+        // Reset velocities
+        quad.material.map = rt2.texture;
+        renderer.setRenderTarget(rtVelocity1); renderer.render(sc, cameraFBO);
+        renderer.setRenderTarget(rtVelocity2); renderer.render(sc, cameraFBO);
+
+        renderer.setRenderTarget(null);
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // --- Particle Addition Functions ---
+    let pendingParticlePosition = null;
+    let raycaster = new THREE.Raycaster();
+    let mouse = new THREE.Vector2();
+    let mouseDownPos = null;
+    let isDragging = false;
+
+    function setupParticleClickHandler() {
+        const modal = document.getElementById('particleModal');
+        const addBtn = document.getElementById('addParticleBtn');
+        const cancelBtn = document.getElementById('cancelParticleBtn');
+        const massInput = document.getElementById('particleMass');
+
+        // Track mouse down position
+        renderer.domElement.addEventListener('mousedown', (event) => {
+            // Only handle left mouse button (button 0)
+            if (event.button !== 0) return;
+            
+            // Don't add particle if clicking on UI
+            if (event.target.closest('#ui')) return;
+            
+            // Don't trigger if modifier keys are pressed (used for panning/zooming)
+            if (event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
+            
+            // Store initial mouse position
+            mouseDownPos = { x: event.clientX, y: event.clientY };
+            isDragging = false;
+        });
+
+        // Track mouse movement to detect dragging
+        renderer.domElement.addEventListener('mousemove', (event) => {
+            if (mouseDownPos !== null) {
+                const dx = event.clientX - mouseDownPos.x;
+                const dy = event.clientY - mouseDownPos.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // If mouse moved more than 5 pixels, consider it a drag
+                if (distance > 5) {
+                    isDragging = true;
+                }
+            }
+        });
+
+        // Handle mouse up - only add particle if it was a click (not a drag)
+        renderer.domElement.addEventListener('mouseup', (event) => {
+            // Only handle left mouse button (button 0)
+            if (event.button !== 0) {
+                mouseDownPos = null;
+                isDragging = false;
+                return;
+            }
+            
+            // Don't add particle if clicking on UI
+            if (event.target.closest('#ui')) {
+                mouseDownPos = null;
+                isDragging = false;
+                return;
+            }
+            
+            // Don't trigger if modifier keys are pressed
+            if (event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) {
+                mouseDownPos = null;
+                isDragging = false;
+                return;
+            }
+            
+            // Only proceed if it was a click (not a drag)
+            if (mouseDownPos !== null && !isDragging) {
+                // Calculate mouse position in normalized device coordinates
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                // Raycast to find intersection with an invisible plane at y=0
+                raycaster.setFromCamera(mouse, camera);
+                
+                // Create a plane at y=0 to intersect with
+                const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+                const intersectionPoint = new THREE.Vector3();
+                const hasIntersection = raycaster.ray.intersectPlane(plane, intersectionPoint);
+                
+                // If we got a valid intersection, open modal
+                if (hasIntersection !== null && !isNaN(intersectionPoint.x)) {
+                    pendingParticlePosition = intersectionPoint.clone();
+                    modal.classList.add('active');
+                    massInput.focus();
+                    massInput.select();
+                }
+            }
+            
+            // Reset tracking
+            mouseDownPos = null;
+            isDragging = false;
+        });
+
+        // Add particle button
+        addBtn.addEventListener('click', () => {
+            const mass = parseFloat(massInput.value) || 1.0;
+            if (pendingParticlePosition && mass > 0) {
+                addParticleToSimulation(pendingParticlePosition, mass);
+            }
+            modal.classList.remove('active');
+            pendingParticlePosition = null;
+        });
+
+        // Cancel button
+        cancelBtn.addEventListener('click', () => {
+            modal.classList.remove('active');
+            pendingParticlePosition = null;
+        });
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                modal.classList.remove('active');
+                pendingParticlePosition = null;
+            }
+        });
+    }
+
+    function addParticleToSimulation(position, mass) {
+        const EMPTY_THRESHOLD = 0.001;
+
+        let slotIndex = -1;
+        for (let i = 0; i < PARTICLES; i++) {
+            if (particleMasses[i] < EMPTY_THRESHOLD) { slotIndex = i; break; }
+        }
+        if (slotIndex === -1) {
+            let minMass = Infinity;
+            for (let i = 0; i < PARTICLES; i++) {
+                const m = particleMasses[i];
+                if (m < minMass) { minMass = m; slotIndex = i; }
+            }
+            console.warn(`No empty slot found, replacing particle at index ${slotIndex} with mass ${minMass.toFixed(3)}`);
+        }
+
+        particleMasses[slotIndex] = mass;
+
+        const col = slotIndex % TEXTURE_WIDTH;
+        const row = Math.floor(slotIndex / TEXTURE_WIDTH);
+
+        // Inject position into the current position buffer (write to the other buffer, then swap to avoid feedback)
+        matInject.uniforms.texIn.value = rtPosition1.texture;
+        matInject.uniforms.targetCoord.value.set(col, row);
+        matInject.uniforms.newValue.value.set(position.x, position.y, position.z, mass);
+        renderer.setRenderTarget(rtPosition2);
+        renderer.render(sceneInject, cameraFBO);
+        renderer.setRenderTarget(null);
+        let tempPos = rtPosition1; rtPosition1 = rtPosition2; rtPosition2 = tempPos;
+
+        // Inject velocity (zero) into the current velocity buffer
+        matInject.uniforms.texIn.value = rtVelocity1.texture;
+        matInject.uniforms.targetCoord.value.set(col, row);
+        matInject.uniforms.newValue.value.set(0, 0, 0, 0);
+        renderer.setRenderTarget(rtVelocity2);
+        renderer.render(sceneInject, cameraFBO);
+        renderer.setRenderTarget(null);
+        let tempVel = rtVelocity1; rtVelocity1 = rtVelocity2; rtVelocity2 = tempVel;
+
+        // Ensure visuals + grid sample the updated current buffers immediately
+        gridUniforms.texPos.value = rtPosition1.texture;
+        particleUniforms.texPos.value = rtPosition1.texture;
+        particleUniforms.texVel.value = rtVelocity1.texture;
+
+        materialParticles.uniformsNeedUpdate = true;
+        gridMesh.material.uniformsNeedUpdate = true;
+
+        console.log(`Added particle at (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}) with mass ${mass} at slot ${slotIndex}`);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const dt = 0.016 * speed; // Fixed time step scaled by slider
+
+        if (speed > 0) {
+            // --- GPGPU STEP ---
+            
+            // 1. Update Velocity
+            meshVel.visible = true; meshPos.visible = false;
+            matVel.uniforms.texPos.value = rtPosition1.texture;
+            matVel.uniforms.texVel.value = rtVelocity1.texture;
+            matVel.uniforms.delta.value = dt;
+            matVel.uniforms.time.value = performance.now() * 0.001;
+            
+            renderer.setRenderTarget(rtVelocity2);
+            renderer.render(sceneFBO, cameraFBO);
+            
+            // 2. Update Position
+            meshVel.visible = false; meshPos.visible = true;
+            matPos.uniforms.texPos.value = rtPosition1.texture;
+            matPos.uniforms.texVel.value = rtVelocity2.texture; // Use new velocity
+            matPos.uniforms.delta.value = dt;
+            
+            renderer.setRenderTarget(rtPosition2);
+            renderer.render(sceneFBO, cameraFBO);
+            
+            renderer.setRenderTarget(null);
+
+            // Swap Buffers
+            let tempPos = rtPosition1; rtPosition1 = rtPosition2; rtPosition2 = tempPos;
+            let tempVel = rtVelocity1; rtVelocity1 = rtVelocity2; rtVelocity2 = tempVel;
+        }
+
+        // --- RENDER STEP ---
+        
+        // Feed the Simulation Data to the Visuals
+        // Always update textures after buffer swap to ensure we're reading from the correct buffer
+        particleUniforms.texPos.value = rtPosition1.texture;
+        particleUniforms.texVel.value = rtVelocity1.texture;
+        gridUniforms.texPos.value = rtPosition1.texture;
+        
+        // Force uniforms update every frame to ensure textures are current
+        materialParticles.uniformsNeedUpdate = true;
+        gridMesh.material.uniformsNeedUpdate = true;
+        
+        controls.update();
+        renderer.render(scene, camera);
+    }
+
+    init();
+
+</script>
+</body>
+</html>
