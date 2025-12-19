@@ -84,6 +84,22 @@
         .slider-group { margin-top: 15px; }
         label { display: block; font-size: 0.75rem; margin-bottom: 5px; color: #aaa; }
         input[type="range"] { width: 100%; accent-color: #00d2ff; }
+        select {
+            width: 100%;
+            padding: 8px 10px;
+            background: #111;
+            color: #eee;
+            border: 1px solid #444;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        select:focus {
+            outline: none;
+            border-color: #00d2ff;
+        }
+        #ui .slider-group label { display: flex; justify-content: space-between; align-items: center; }
+        #speedDisplay { font-family: monospace; color: #fff; }
 
         #warning {
             color: #ffaa00;
@@ -218,6 +234,10 @@
             flex: 1;
         }
 
+        .toggle-group.disabled label {
+            color: #555;
+        }
+
         .toggle-switch {
             position: relative;
             width: 50px;
@@ -232,6 +252,11 @@
         .toggle-switch.active {
             background: #00d2ff;
             border-color: #00d2ff;
+        }
+
+        .toggle-switch.disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
         }
 
         .toggle-switch::after {
@@ -269,16 +294,32 @@
     
     <div class="stat-row">
         <span>Particles:</span>
-        <span class="stat-val">1024</span>
+        <span class="stat-val" id="particlesVal">4096</span>
     </div>
     <div class="stat-row">
         <span>Calculations/Frame:</span>
-        <span class="stat-val">~1.05 Million</span>
+        <span class="stat-val" id="calcVal">~16.78 M</span>
+    </div>
+    <div class="stat-row">
+        <span>FPS:</span>
+        <span class="stat-val" id="fpsVal">--</span>
+    </div>
+    <div class="stat-row">
+        <span>Sim Time:</span>
+        <span class="stat-val" id="simTimeVal">0.0s</span>
     </div>
 
     <div class="slider-group">
-        <label>Time Speed</label>
+        <label>Time Speed <span class="stat-val" id="speedDisplay">1.0x</span></label>
         <input type="range" id="speedRange" min="0" max="2" step="0.1" value="1">
+    </div>
+
+    <div class="slider-group">
+        <label>Simulation</label>
+        <select id="simulationSelect">
+            <option value="disk">Disk</option>
+            <option value="web">Universe Web</option>
+        </select>
     </div>
 
     <div class="toggle-group">
@@ -287,6 +328,7 @@
     </div>
 
     <button id="settingsBtn">Settings</button>
+    <button id="resetCameraBtn">Reset Camera</button>
     <button id="resetBtn">Reset Simulation</button>
     <div id="warning">Hardware acceleration required.</div>
 </div>
@@ -360,8 +402,52 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
     // --- Configuration ---
-    const TEXTURE_WIDTH = 64; // 32x32 = 1024 particles
-    const PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
+    const TARGET_STEP = 1 / 60;
+    const MAX_SUBSTEPS = 4;
+    const SIMULATION_MODES = {
+        disk: {
+            label: 'Disk',
+            textureWidth: 64,
+            gridVisible: true,
+            gridEnabled: true,
+            camera: { x: 0, y: 100, z: 250 }
+        },
+        web: {
+            label: 'Universe Web',
+            textureWidth: 128,
+            gridVisible: false,
+            gridEnabled: false,
+            camera: { x: 0, y: 220, z: 820 }
+        }
+    };
+    const DISK_SETTINGS = {
+        radius: 520,
+        height: 110,
+        arms: 3,
+        tightness: 0.28,
+        centralMass: 1800
+    };
+    const WEB_SETTINGS = {
+        radius: 900,
+        thickness: 140,
+        hubCount: 8,
+        hubMassMin: 18,
+        hubMassMax: 65
+    };
+    const GALAXY_RADIUS = DISK_SETTINGS.radius;
+    const GALAXY_HEIGHT = DISK_SETTINGS.height;
+    const GALAXY_ARMS = DISK_SETTINGS.arms;
+    const GALAXY_TIGHTNESS = DISK_SETTINGS.tightness;
+    const CENTRAL_MASS = DISK_SETTINGS.centralMass;
+    const WEB_RADIUS = WEB_SETTINGS.radius;
+    const WEB_THICKNESS = WEB_SETTINGS.thickness;
+    const HUB_COUNT = WEB_SETTINGS.hubCount;
+    const HUB_MASS_MIN = WEB_SETTINGS.hubMassMin;
+    const HUB_MASS_MAX = WEB_SETTINGS.hubMassMax;
+
+    let simulationMode = 'disk';
+    let TEXTURE_WIDTH = SIMULATION_MODES[simulationMode].textureWidth;
+    let PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
     
     // --- Configurable Parameters ---
     let BOUNDS = 2000;
@@ -371,19 +457,30 @@
     let DAMPING = 0.9995;
     let MAX_VELOCITY = 120.0;
     let PARTICLE_SIZE_MULT = 5.5;
-    let gridVisible = true;
+    let gridVisible = SIMULATION_MODES[simulationMode].gridVisible;
+    let gridEnabled = SIMULATION_MODES[simulationMode].gridEnabled;
+    let cameraDefaults = { ...SIMULATION_MODES[simulationMode].camera };
 
-    const GALAXY_RADIUS = 520;
-    const GALAXY_HEIGHT = 110;
-    const GALAXY_ARMS = 3;
-    const GALAXY_TIGHTNESS = 0.28;
-    const CORE_PARTICLES = Math.max(12, Math.floor(PARTICLES * 0.01));
-    const CENTRAL_MASS = 1800;
+    let CORE_PARTICLES = Math.max(12, Math.floor(PARTICLES * 0.01));
+    let HUB_CORE_PARTICLES = Math.max(18, Math.floor(PARTICLES * 0.03));
+    let FILAMENT_PARTICLES = Math.floor(PARTICLES * 0.62);
+    let VOID_PARTICLES = PARTICLES - HUB_CORE_PARTICLES - FILAMENT_PARTICLES;
+    const GRID_LIGHT_DIR = new THREE.Vector3(0.45, 0.78, 0.4).normalize();
+    const GRID_LIGHT_COLOR = new THREE.Color(0xfff4dd);
 
     // --- State ---
     let scene, camera, renderer, controls;
-    let time = 0;
     let speed = 1.0;
+    let simTime = 0;
+    let lastFrameTime = 0;
+    let lastFpsSample = 0;
+    let frameCounter = 0;
+    let uiStats = {};
+    let webHubs = [];
+    
+    // Keyboard movement state
+    const keys = {};
+    const moveSpeed = 5.0; // Movement speed per frame
 
     // --- GPU Compute Variables ---
     let gpuCompute;
@@ -397,6 +494,7 @@
     let sceneFBO, cameraFBO;
     let rtPosition1, rtPosition2;
     let rtVelocity1, rtVelocity2;
+    let geometryFBO;
     let meshPos, meshVel;
     let matPos, matVel;
 
@@ -449,7 +547,7 @@
     }
 
     // 3. Velocity Fragment Shader (Gravity Physics - The Heavy Lifter)
-    function getFsVelocity() {
+    function getFsVelocity(widthValue) {
         return `
         uniform sampler2D texPos;
         uniform sampler2D texVel;
@@ -461,7 +559,7 @@
         uniform float maxVelocity;
         varying vec2 vUv;
 
-        const float width = ${TEXTURE_WIDTH.toFixed(1)};
+        const float width = ${widthValue.toFixed(1)};
         const float count = width * width;
 
         void main() {
@@ -516,36 +614,46 @@
     // 4. Particle Vertex Shader (Visuals)
     const vsParticles = `
         uniform sampler2D texPos;
-        uniform sampler2D texVel;
         uniform float particleSizeMult;
         varying vec3 vColor;
-        varying float vMass;
+        varying float vLum;
+        varying float vSeed;
 
         void main() {
             // Read position from texture based on uv coordinate
             // We use the 'position' attribute of the buffer geometry as the UV lookup
             vec2 uv = position.xy;
             vec4 posData = texture2D( texPos, uv );
-            vec4 velData = texture2D( texVel, uv );
 
             vec3 pos = posData.xyz;
-            float mass = max(posData.w, 1.0); // Ensure minimum mass
-            vMass = mass;
+            float mass = max(posData.w, 0.6);
 
-            // Color based on velocity - make it always visible
-            float speed = length(velData.xyz);
-            vec3 colorCold = vec3(0.3, 0.6, 1.0);
-            vec3 colorHot = vec3(1.0, 0.6, 0.3);
-            vColor = mix(colorCold, colorHot, min(speed * 0.1, 1.0)) * 2.0; // Even brighter
+            // Stable per-particle seed from UVs
+            vSeed = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453);
+
+            float massNorm = clamp((mass - 0.8) / 7.5, 0.0, 1.0);
+            float warmBlend = smoothstep(0.0, 0.55, massNorm);
+            float blueBlend = smoothstep(0.6, 1.0, massNorm);
+
+            vec3 warmColor = vec3(1.0, 0.76, 0.52);
+            vec3 whiteColor = vec3(1.0, 0.95, 0.88);
+            vec3 blueColor = vec3(0.62, 0.8, 1.0);
+
+            vec3 baseColor = mix(warmColor, whiteColor, warmBlend);
+            baseColor = mix(baseColor, blueColor, blueBlend);
+            vColor = baseColor;
+
+            vLum = clamp(pow(mass, 0.75), 0.9, 5.0);
 
             // Calculate View Position
             vec4 mvPosition = modelViewMatrix * vec4( pos, 1.0 );
             gl_Position = projectionMatrix * mvPosition;
 
-            // Size based on mass - ensure always visible
-            float depth = max(-mvPosition.z, 0.1); // Clamp depth
-            gl_PointSize = max(mass * particleSizeMult * (300.0 / depth), 5.0); // Smaller particles, higher minimum
-            gl_PointSize = min(gl_PointSize, 100.0); // Cap maximum
+            // Size based on mass with softer falloff
+            float depth = max(-mvPosition.z, 0.1);
+            float sizeFactor = pow(mass, 0.6);
+            gl_PointSize = particleSizeMult * sizeFactor * (400.0 / depth);
+            gl_PointSize = clamp(gl_PointSize, 6.0, 190.0);
         }
     `;
 
@@ -553,35 +661,40 @@
     const fsParticles = `
         uniform float time;
         varying vec3 vColor;
-        varying float vMass;
+        varying float vLum;
+        varying float vSeed;
         void main() {
             vec2 cxy = 2.0 * gl_PointCoord - 1.0;
             float r = dot(cxy, cxy);
             if (r > 1.0) discard;
 
-            float glow = 1.0 - r;
-            float heat = clamp((vMass - 1.0) * 0.08, 0.0, 1.0);
-            float flicker = 0.85 + 0.15 * sin(time * 4.0 + vMass * 5.0);
-            float alpha = clamp(pow(glow, 1.1) * flicker, 0.0, 1.0);
+            float dist = sqrt(r);
+            float core = exp(-dist * dist * 16.0);
+            float halo = exp(-dist * dist * 4.0);
 
-            vec3 warmTint = mix(vColor, vec3(1.0, 0.9, 0.7), heat * 0.6);
-            vec3 core = warmTint * (1.0 + heat * 0.3);
-            vec3 halo = vColor * glow * 0.6;
-            vec3 finalColor = (core + halo) * flicker;
+            float twinkleStrength = mix(0.14, 0.05, clamp(vLum / 3.5, 0.0, 1.0));
+            float twinkle = 1.0 + twinkleStrength * sin(time * (2.5 + vSeed * 2.0) + vSeed * 12.0);
 
-            gl_FragColor = vec4(finalColor * 1.2, alpha);
+            vec3 coreColor = mix(vColor, vec3(1.0), 0.35);
+            vec3 haloColor = vColor * 0.7;
+
+            vec3 finalColor = (coreColor * core * 1.45 + haloColor * halo * 0.85) * vLum * twinkle * 1.3;
+            float alpha = clamp(core * 1.15 + halo * 0.6, 0.0, 1.0);
+
+            gl_FragColor = vec4(finalColor, alpha);
         }
     `;
 
     // 6. Grid Vertex Shader (Spacetime warping)
-    const vsGrid = `
+    function getVsGrid(widthValue) {
+        return `
         uniform sampler2D texPos;
         varying float vDepth;
         varying vec2 vUv;
         varying vec3 vNormal;
         varying vec3 vViewPosition;
 
-        const float width = ${TEXTURE_WIDTH.toFixed(1)};
+        const float width = ${widthValue.toFixed(1)};
 
         void main() {
             vUv = uv;
@@ -617,6 +730,7 @@
             gl_Position = projectionMatrix * mvPosition;
         }
     `;
+    }
 
     // 7. Grid Fragment Shader
     const fsGrid = `
@@ -686,9 +800,10 @@
             size / 2, size / 2, size / 2
         );
         gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
-        gradient.addColorStop(0.15, 'rgba(255, 255, 255, 0.9)');
-        gradient.addColorStop(0.35, 'rgba(255, 255, 255, 0.7)');
-        gradient.addColorStop(1, 'rgba(204, 232, 255, 0.0)');
+        gradient.addColorStop(0.08, 'rgba(255, 255, 255, 0.9)');
+        gradient.addColorStop(0.22, 'rgba(255, 255, 255, 0.55)');
+        gradient.addColorStop(0.55, 'rgba(160, 200, 255, 0.18)');
+        gradient.addColorStop(1, 'rgba(120, 160, 255, 0.0)');
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, size, size);
         const texture = new THREE.CanvasTexture(canvas);
@@ -698,99 +813,73 @@
         return texture;
     }
 
+    function applySimulationMode(mode) {
+        const config = SIMULATION_MODES[mode] || SIMULATION_MODES.disk;
+        simulationMode = SIMULATION_MODES[mode] ? mode : 'disk';
+        TEXTURE_WIDTH = config.textureWidth;
+        PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
+        gridVisible = config.gridVisible;
+        gridEnabled = config.gridEnabled;
+        cameraDefaults = { ...config.camera };
 
-    function init() {
-        // --- Basic Setup ---
-        const container = document.getElementById('canvas-container');
-        renderer = new THREE.WebGLRenderer({ 
-            antialias: true,
-            powerPreference: "high-performance"
-        });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.2;
-        renderer.physicallyCorrectLights = true;
-        
-        // Check for required WebGL features
-        const gl = renderer.getContext();
-        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-        if (debugInfo) {
-            console.log('GPU:', gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
+        CORE_PARTICLES = Math.max(12, Math.floor(PARTICLES * 0.01));
+        HUB_CORE_PARTICLES = Math.max(18, Math.floor(PARTICLES * 0.03));
+        FILAMENT_PARTICLES = Math.floor(PARTICLES * 0.62);
+        VOID_PARTICLES = PARTICLES - HUB_CORE_PARTICLES - FILAMENT_PARTICLES;
+        webHubs = [];
+    }
+
+    function disposeMesh(mesh) {
+        if (!mesh) return;
+        if (scene) scene.remove(mesh);
+        if (mesh.geometry) mesh.geometry.dispose();
+        if (Array.isArray(mesh.material)) {
+            mesh.material.forEach(material => material.dispose());
+        } else if (mesh.material) {
+            mesh.material.dispose();
         }
-        
-        if(!renderer.capabilities.floatFragmentTextures) {
-            document.getElementById('warning').style.display = 'block';
-            document.getElementById('warning').innerText = "Error: OES_texture_float not supported on this device.";
-            console.error("Float textures not supported!");
-        } else {
-            console.log("Float textures supported:", renderer.capabilities.floatFragmentTextures);
+    }
+
+    function cleanupSimulation() {
+        disposeMesh(particleMesh);
+        disposeMesh(gridMesh);
+        particleMesh = null;
+        gridMesh = null;
+        gridUniforms = null;
+        particleUniforms = null;
+
+        if (geometryFBO) {
+            geometryFBO.dispose();
+            geometryFBO = null;
         }
-        container.appendChild(renderer.domElement);
+        if (matPos) matPos.dispose();
+        if (matVel) matVel.dispose();
+        if (matInject) matInject.dispose();
+        matPos = null;
+        matVel = null;
+        matInject = null;
 
-        scene = new THREE.Scene();
-        // scene.fog = new THREE.FogExp2(0x050505, 0.001);
+        if (rtPosition1) rtPosition1.dispose();
+        if (rtPosition2) rtPosition2.dispose();
+        if (rtVelocity1) rtVelocity1.dispose();
+        if (rtVelocity2) rtVelocity2.dispose();
+        rtPosition1 = null;
+        rtPosition2 = null;
+        rtVelocity1 = null;
+        rtVelocity2 = null;
 
-        const gridLightDir = new THREE.Vector3(0.45, 0.78, 0.4).normalize();
-        const gridLightColor = new THREE.Color(0xfff4dd);
+        sceneFBO = null;
+        sceneInject = null;
+        meshPos = null;
+        meshVel = null;
+        meshInject = null;
+    }
 
-        const directionalLight = new THREE.DirectionalLight(gridLightColor, 1.35);
-        directionalLight.position.copy(gridLightDir.clone().multiplyScalar(220));
-        directionalLight.target.position.set(0, 0, 0);
-        scene.add(directionalLight);
-        scene.add(directionalLight.target);
-
-        const hemisphereLight = new THREE.HemisphereLight(0x8899ff, 0x03010a, 0.45);
-        scene.add(hemisphereLight);
-
-        const fillLight = new THREE.PointLight(0x4aa8ff, 0.9, 0, 2);
-        fillLight.position.set(-90, 40, -150);
-        scene.add(fillLight);
-
-        const coreGlow = new THREE.PointLight(0xffe4aa, 0.35, 600, 2);
-        coreGlow.position.set(0, 60, 0);
-        scene.add(coreGlow);
-
-        // Subtle starfield backdrop for depth
-        const starCount = 1500;
-        const starGeo = new THREE.BufferGeometry();
-        const starPositions = new Float32Array(starCount * 3);
-        for (let i = 0; i < starCount; i++) {
-            const distance = 800 + Math.random() * 1200;
-            const theta = Math.random() * Math.PI * 2;
-            const phi = Math.acos(2 * Math.random() - 1);
-            starPositions[i * 3 + 0] = distance * Math.sin(phi) * Math.cos(theta);
-            starPositions[i * 3 + 1] = distance * Math.sin(phi) * Math.sin(theta);
-            starPositions[i * 3 + 2] = distance * Math.cos(phi);
-        }
-        starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-        const starTexture = createGlowTexture(128);
-        const starMaterial = new THREE.PointsMaterial({
-            map: starTexture,
-            color: 0xffffff,
-            size: 0.8,
-            transparent: true,
-            opacity: 0.92,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
-            sizeAttenuation: true,
-            alphaTest: 0.02
-        });
-        const starField = new THREE.Points(starGeo, starMaterial);
-        scene.add(starField);
-
-        camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
-        camera.position.set(0, 100, 250);
-        camera.lookAt(0, 0, 0);
-
-        controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-
+    function setupSimulation() {
         // --- FBO Setup (The GPU Computer) ---
         sceneFBO = new THREE.Scene();
-        cameraFBO = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        
+        if (!cameraFBO) cameraFBO = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
         // Initial Data
         const initialPos = getInitialPositions();
         const initialVel = getInitialVelocities(initialPos);
@@ -804,7 +893,7 @@
         rtVelocity2 = createRenderTarget(initialVel);
 
         // FBO Geometry (Full screen quad)
-        const geometryFBO = new THREE.PlaneGeometry(2, 2);
+        geometryFBO = new THREE.PlaneGeometry(2, 2);
 
         // Simulation Materials
         matPos = new THREE.ShaderMaterial({
@@ -831,7 +920,7 @@
                 maxVelocity: { value: MAX_VELOCITY }
             },
             vertexShader: vsFBO,
-            fragmentShader: getFsVelocity()
+            fragmentShader: getFsVelocity(TEXTURE_WIDTH)
         });
 
         meshPos = new THREE.Mesh(geometryFBO, matPos);
@@ -853,17 +942,13 @@
         meshInject = new THREE.Mesh(geometryFBO, matInject);
         sceneInject.add(meshInject);
 
-
         // --- Visual Scene Setup ---
 
         // 1. Particles System
-        // We use a BufferGeometry where 'position' attribute actually stores UV coordinates
-        // to look up real positions in the texture.
         const particlesGeo = new THREE.BufferGeometry();
         const particleUvs = new Float32Array(PARTICLES * 3);
         
         for (let i = 0; i < PARTICLES; i++) {
-            // Map index to 0..1 UV space (center of each texel)
             const col = i % TEXTURE_WIDTH;
             const row = Math.floor(i / TEXTURE_WIDTH);
             const x = (col + 0.5) / TEXTURE_WIDTH;
@@ -873,9 +958,10 @@
             particleUvs[i * 3 + 1] = y;
             particleUvs[i * 3 + 2] = 0;
         }
-        
+
         console.log("Sample UVs:", particleUvs[0], particleUvs[1], particleUvs[2]);
-        console.log("Last UVs:", particleUvs[(PARTICLES-1)*3], particleUvs[(PARTICLES-1)*3+1], particleUvs[(PARTICLES-1)*3+2]);
+        console.log("Last UVs:", particleUvs[(PARTICLES - 1) * 3], particleUvs[(PARTICLES - 1) * 3 + 1], particleUvs[(PARTICLES - 1) * 3 + 2]);
+
         particlesGeo.setAttribute('position', new THREE.BufferAttribute(particleUvs, 3));
 
         particleUniforms = {
@@ -897,18 +983,17 @@
         });
 
         particleMesh = new THREE.Points(particlesGeo, materialParticles);
+        particleMesh.frustumCulled = false;
         scene.add(particleMesh);
         
-        // Initialize uniforms with initial textures
         particleUniforms.texPos.value = rtPosition1.texture;
         particleUniforms.texVel.value = rtVelocity1.texture;
         particleUniforms.time.value = performance.now() * 0.001;
-        
+
         console.log("Particle system initialized:", PARTICLES, "particles");
         console.log("Position RT:", rtPosition1, "Texture:", rtPosition1.texture);
         console.log("Velocity RT:", rtVelocity1, "Texture:", rtVelocity1.texture);
-        
-        // Verify texture is valid
+
         if (!rtPosition1.texture) {
             console.error("ERROR: Position texture is null!");
         }
@@ -917,73 +1002,295 @@
         }
 
         // 2. Spacetime Grid
-        // A high res plane
-        const gridGeo = new THREE.PlaneGeometry(1000, 1000, 100, 100);
-        gridGeo.rotateX(-Math.PI / 2);
-        
-        gridUniforms = {
-            texPos: { value: null },
-            lightDir: { value: gridLightDir.clone() },
-            lightColor: { value: gridLightColor.clone() },
-            ambientIntensity: { value: 0.28 }
-        };
+        if (gridEnabled) {
+            const gridGeo = new THREE.PlaneGeometry(1000, 1000, 100, 100);
+            gridGeo.rotateX(-Math.PI / 2);
+            
+            gridUniforms = {
+                texPos: { value: null },
+                lightDir: { value: GRID_LIGHT_DIR.clone() },
+                lightColor: { value: GRID_LIGHT_COLOR.clone() },
+                ambientIntensity: { value: 0.28 }
+            };
 
-        const materialGrid = new THREE.ShaderMaterial({
-            uniforms: gridUniforms,
-            vertexShader: vsGrid,
-            fragmentShader: fsGrid,
-            transparent: true,
-            wireframe: false,
-            side: THREE.DoubleSide
+            const materialGrid = new THREE.ShaderMaterial({
+                uniforms: gridUniforms,
+                vertexShader: getVsGrid(TEXTURE_WIDTH),
+                fragmentShader: fsGrid,
+                transparent: true,
+                wireframe: false,
+                side: THREE.DoubleSide
+            });
+
+            gridMesh = new THREE.Mesh(gridGeo, materialGrid);
+            gridMesh.frustumCulled = false;
+            gridMesh.visible = gridVisible;
+            scene.add(gridMesh);
+            updateGridScale();
+        }
+
+        simTime = 0;
+        if (uiStats.simTimeVal) uiStats.simTimeVal.textContent = '0.0s';
+    }
+
+    function rebuildSimulation(mode) {
+        applySimulationMode(mode);
+        cleanupSimulation();
+        setupSimulation();
+        setupStatsUI();
+        syncGridToggle();
+        resetCamera();
+        lastFrameTime = performance.now();
+        lastFpsSample = lastFrameTime;
+        frameCounter = 0;
+        const simulationSelect = document.getElementById('simulationSelect');
+        if (simulationSelect) simulationSelect.value = simulationMode;
+    }
+
+    function syncGridToggle() {
+        const gridToggle = document.getElementById('gridToggle');
+        if (!gridToggle) return;
+        const isDisabled = !gridEnabled || !gridMesh;
+        gridToggle.classList.toggle('active', gridVisible && !isDisabled);
+        gridToggle.classList.toggle('disabled', isDisabled);
+        const gridGroup = gridToggle.closest('.toggle-group');
+        if (gridGroup) gridGroup.classList.toggle('disabled', isDisabled);
+    }
+
+
+    function init() {
+        // --- Basic Setup ---
+        const container = document.getElementById('canvas-container');
+        applySimulationMode(simulationMode);
+        renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            powerPreference: "high-performance"
         });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.3;
+        renderer.physicallyCorrectLights = true;
+        
+        // Check for required WebGL features
+        const gl = renderer.getContext();
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+            console.log('GPU:', gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL));
+        }
+        
+        if(!renderer.capabilities.floatFragmentTextures) {
+            document.getElementById('warning').style.display = 'block';
+            document.getElementById('warning').innerText = "Error: OES_texture_float not supported on this device.";
+            console.error("Float textures not supported!");
+        } else {
+            console.log("Float textures supported:", renderer.capabilities.floatFragmentTextures);
+        }
+        container.appendChild(renderer.domElement);
 
-        gridMesh = new THREE.Mesh(gridGeo, materialGrid);
-        scene.add(gridMesh);
+        scene = new THREE.Scene();
+        // scene.fog = new THREE.FogExp2(0x050505, 0.001);
+
+        const directionalLight = new THREE.DirectionalLight(0xf5f1e6, 1.1);
+        directionalLight.position.copy(GRID_LIGHT_DIR.clone().multiplyScalar(220));
+        directionalLight.target.position.set(0, 0, 0);
+        scene.add(directionalLight);
+        scene.add(directionalLight.target);
+
+        const hemisphereLight = new THREE.HemisphereLight(0xaab9ff, 0x06040a, 0.25);
+        scene.add(hemisphereLight);
+
+        const fillLight = new THREE.PointLight(0x7fa8ff, 0.45, 0, 2);
+        fillLight.position.set(-90, 40, -150);
+        scene.add(fillLight);
+
+        const coreGlow = new THREE.PointLight(0xfff1d6, 0.25, 600, 2);
+        coreGlow.position.set(0, 60, 0);
+        scene.add(coreGlow);
+
+        // Subtle starfield backdrop for depth
+        const starCount = 1500;
+        const starGeo = new THREE.BufferGeometry();
+        const starPositions = new Float32Array(starCount * 3);
+        const starColors = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+            const distance = 1800 + Math.random() * 2200;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            starPositions[i * 3 + 0] = distance * Math.sin(phi) * Math.cos(theta);
+            starPositions[i * 3 + 1] = distance * Math.sin(phi) * Math.sin(theta);
+            starPositions[i * 3 + 2] = distance * Math.cos(phi);
+
+            const temp = Math.random();
+            let r = 1.0;
+            let g = 1.0;
+            let b = 1.0;
+            if (temp < 0.7) {
+                const t = temp / 0.7;
+                r = 1.0;
+                g = 0.78 + 0.18 * t;
+                b = 0.55 + 0.35 * t;
+            } else {
+                const t = (temp - 0.7) / 0.3;
+                r = 0.9 - 0.25 * t;
+                g = 0.9 - 0.1 * t;
+                b = 1.0;
+            }
+            const brightness = 0.6 + Math.random() * 0.4;
+            starColors[i * 3 + 0] = r * brightness;
+            starColors[i * 3 + 1] = g * brightness;
+            starColors[i * 3 + 2] = b * brightness;
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+        const starTexture = createGlowTexture(128);
+        const starMaterial = new THREE.PointsMaterial({
+            map: starTexture,
+            color: 0xffffff,
+            size: 2.2,
+            transparent: true,
+            opacity: 0.85,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true,
+            alphaTest: 0.02,
+            vertexColors: true
+        });
+        const starField = new THREE.Points(starGeo, starMaterial);
+        scene.add(starField);
+
+        camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10000);
+        camera.position.set(cameraDefaults.x, cameraDefaults.y, cameraDefaults.z);
+        camera.lookAt(0, 0, 0);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        setupSimulation();
 
         // Events
         window.addEventListener('resize', onWindowResize);
-        document.getElementById('speedRange').addEventListener('input', e => speed = parseFloat(e.target.value));
-        document.getElementById('resetBtn').addEventListener('click', resetSimulation);
+        const resetBtn = document.getElementById('resetBtn');
+        if (resetBtn) resetBtn.addEventListener('click', resetSimulation);
+        const resetCameraBtn = document.getElementById('resetCameraBtn');
+        if (resetCameraBtn) resetCameraBtn.addEventListener('click', resetCamera);
+        
+        // Keyboard movement controls
+        window.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            const code = e.code.toLowerCase();
+            keys[key] = true;
+            keys[code] = true; // Also track by code for arrow keys and special keys
+            
+            // Prevent default behavior for movement keys to avoid scrolling
+            const movementKeys = ['w', 'a', 's', 'd', 'q', 'e', ' ', 'space', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', 'shiftleft', 'shiftright'];
+            if (movementKeys.includes(key) || movementKeys.includes(code)) {
+                e.preventDefault();
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            const code = e.code.toLowerCase();
+            keys[key] = false;
+            keys[code] = false;
+        });
         
         // Click handler for adding particles
         setupParticleClickHandler();
         
         // Setup UI handlers
+        setupStatsUI();
         setupUIHandlers();
 
+        lastFrameTime = performance.now();
+        lastFpsSample = lastFrameTime;
         animate();
     }
 
+    function setupStatsUI() {
+        uiStats = {
+            particlesVal: document.getElementById('particlesVal'),
+            calcVal: document.getElementById('calcVal'),
+            fpsVal: document.getElementById('fpsVal'),
+            simTimeVal: document.getElementById('simTimeVal'),
+            speedDisplay: document.getElementById('speedDisplay')
+        };
+
+        if (uiStats.particlesVal) uiStats.particlesVal.textContent = PARTICLES.toString();
+        if (uiStats.calcVal) {
+            const calcPerFrame = PARTICLES * PARTICLES;
+            uiStats.calcVal.textContent = `~${(calcPerFrame / 1e6).toFixed(2)} M`;
+        }
+        if (uiStats.speedDisplay) uiStats.speedDisplay.textContent = `${speed.toFixed(1)}x`;
+        if (uiStats.simTimeVal) uiStats.simTimeVal.textContent = '0.0s';
+        if (uiStats.fpsVal) uiStats.fpsVal.textContent = '--';
+    }
+
+    function updateGridScale() {
+        if (!gridMesh) return;
+        const scale = BOUNDS / 1000;
+        gridMesh.scale.set(scale, 1, scale);
+    }
+
+    function resetCamera() {
+        if (!camera || !controls) return;
+        camera.position.set(cameraDefaults.x, cameraDefaults.y, cameraDefaults.z);
+        controls.target.set(0, 0, 0);
+        controls.update();
+    }
+
     function setupUIHandlers() {
+        const speedRange = document.getElementById('speedRange');
+        const speedDisplay = document.getElementById('speedDisplay');
+
+        const simulationSelect = document.getElementById('simulationSelect');
+        if (simulationSelect) {
+            simulationSelect.value = simulationMode;
+            simulationSelect.addEventListener('change', (e) => {
+                const mode = e.target.value;
+                if (mode !== simulationMode) {
+                    rebuildSimulation(mode);
+                }
+            });
+        }
+
         // Grid toggle
         const gridToggle = document.getElementById('gridToggle');
-        gridToggle.classList.add('active'); // Grid is visible by default
-        gridToggle.addEventListener('click', () => {
-            gridVisible = !gridVisible;
-            gridMesh.visible = gridVisible;
-            gridToggle.classList.toggle('active');
-        });
+        if (gridToggle) {
+            gridToggle.addEventListener('click', () => {
+                if (!gridEnabled || !gridMesh) return;
+                gridVisible = !gridVisible;
+                gridMesh.visible = gridVisible;
+                syncGridToggle();
+            });
+            syncGridToggle();
+        }
 
         // UI toggle
         const uiToggle = document.getElementById('uiToggle');
         const ui = document.getElementById('ui');
         let uiVisible = true;
-        uiToggle.addEventListener('click', () => {
-            uiVisible = !uiVisible;
-            if (uiVisible) {
-                ui.classList.remove('hidden');
-                uiToggle.textContent = 'Hide UI';
-            } else {
-                ui.classList.add('hidden');
-                uiToggle.textContent = 'Show UI';
-            }
-        });
+        if (uiToggle && ui) {
+            uiToggle.addEventListener('click', () => {
+                uiVisible = !uiVisible;
+                if (uiVisible) {
+                    ui.classList.remove('hidden');
+                    uiToggle.textContent = 'Hide UI';
+                } else {
+                    ui.classList.add('hidden');
+                    uiToggle.textContent = 'Show UI';
+                }
+            });
+        }
 
         // Settings modal
         const settingsModal = document.getElementById('settingsModal');
         const settingsBtn = document.getElementById('settingsBtn');
         const saveSettingsBtn = document.getElementById('saveSettingsBtn');
         const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
+        const settingsSpeed = document.getElementById('settingsSpeed');
 
         // Load current values into settings modal
         function loadSettingsToModal() {
@@ -999,13 +1306,25 @@
 
         // Update value displays
         function updateSettingsDisplay() {
-            document.getElementById('speedValue').textContent = parseFloat(document.getElementById('settingsSpeed').value).toFixed(1);
+            if (!settingsSpeed) return;
+            document.getElementById('speedValue').textContent = parseFloat(settingsSpeed.value).toFixed(1);
             document.getElementById('gravityValue').textContent = parseFloat(document.getElementById('settingsGravity').value).toFixed(1);
             document.getElementById('softeningValue').textContent = parseFloat(document.getElementById('settingsSoftening').value).toFixed(1);
             document.getElementById('dampingValue').textContent = parseFloat(document.getElementById('settingsDamping').value).toFixed(4);
             document.getElementById('maxVelValue').textContent = parseFloat(document.getElementById('settingsMaxVel').value).toFixed(1);
             document.getElementById('boundsValue').textContent = parseFloat(document.getElementById('settingsBounds').value).toFixed(0);
             document.getElementById('particleSizeValue').textContent = parseFloat(document.getElementById('settingsParticleSize').value).toFixed(1);
+        }
+
+        function applySpeed(value, syncSettings = false) {
+            const clamped = Number.isFinite(value) ? Math.max(0, Math.min(2, value)) : 1.0;
+            speed = clamped;
+            if (speedRange) speedRange.value = speed;
+            if (speedDisplay) speedDisplay.textContent = `${speed.toFixed(1)}x`;
+            if (syncSettings && settingsSpeed) {
+                settingsSpeed.value = speed;
+                updateSettingsDisplay();
+            }
         }
 
         // Update shaders when parameters change
@@ -1017,7 +1336,7 @@
             matPos.needsUpdate = true;
 
             // Update velocity shader
-            matVel.fragmentShader = getFsVelocity();
+            matVel.fragmentShader = getFsVelocity(TEXTURE_WIDTH);
             matVel.uniforms.gravityConstant.value = GRAVITY_CONSTANT;
             matVel.uniforms.softening.value = SOFTENING;
             matVel.uniforms.damping.value = DAMPING;
@@ -1026,50 +1345,63 @@
 
             // Update particle material
             particleUniforms.particleSizeMult.value = PARTICLE_SIZE_MULT;
+            updateGridScale();
         }
 
         // Settings sliders update display
         ['settingsSpeed', 'settingsGravity', 'settingsSoftening', 'settingsDamping', 'settingsMaxVel', 'settingsBounds', 'settingsParticleSize'].forEach(id => {
-            document.getElementById(id).addEventListener('input', updateSettingsDisplay);
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', updateSettingsDisplay);
         });
 
         // Open settings modal
-        settingsBtn.addEventListener('click', () => {
-            loadSettingsToModal();
-            settingsModal.classList.add('active');
-        });
+        if (settingsBtn && settingsModal) {
+            settingsBtn.addEventListener('click', () => {
+                loadSettingsToModal();
+                settingsModal.classList.add('active');
+            });
+        }
 
         // Save settings
-        saveSettingsBtn.addEventListener('click', () => {
-            speed = parseFloat(document.getElementById('settingsSpeed').value);
-            GRAVITY_CONSTANT = parseFloat(document.getElementById('settingsGravity').value);
-            SOFTENING = parseFloat(document.getElementById('settingsSoftening').value);
-            DAMPING = parseFloat(document.getElementById('settingsDamping').value);
-            MAX_VELOCITY = parseFloat(document.getElementById('settingsMaxVel').value);
-            BOUNDS = parseFloat(document.getElementById('settingsBounds').value);
-            BOUNDS_HALF = BOUNDS / 2;
-            PARTICLE_SIZE_MULT = parseFloat(document.getElementById('settingsParticleSize').value);
+        if (saveSettingsBtn && settingsModal && settingsSpeed) {
+            saveSettingsBtn.addEventListener('click', () => {
+                applySpeed(parseFloat(settingsSpeed.value));
+                GRAVITY_CONSTANT = parseFloat(document.getElementById('settingsGravity').value);
+                SOFTENING = parseFloat(document.getElementById('settingsSoftening').value);
+                DAMPING = parseFloat(document.getElementById('settingsDamping').value);
+                MAX_VELOCITY = parseFloat(document.getElementById('settingsMaxVel').value);
+                BOUNDS = parseFloat(document.getElementById('settingsBounds').value);
+                BOUNDS_HALF = BOUNDS / 2;
+                PARTICLE_SIZE_MULT = parseFloat(document.getElementById('settingsParticleSize').value);
 
-            // Update UI slider
-            document.getElementById('speedRange').value = speed;
+                // Update shaders
+                updateShaders();
 
-            // Update shaders
-            updateShaders();
-
-            settingsModal.classList.remove('active');
-        });
+                settingsModal.classList.remove('active');
+            });
+        }
 
         // Cancel settings
-        cancelSettingsBtn.addEventListener('click', () => {
-            settingsModal.classList.remove('active');
-        });
+        if (cancelSettingsBtn && settingsModal) {
+            cancelSettingsBtn.addEventListener('click', () => {
+                settingsModal.classList.remove('active');
+            });
+        }
 
         // Close modal on Escape key
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && settingsModal.classList.contains('active')) {
+            if (e.key === 'Escape' && settingsModal && settingsModal.classList.contains('active')) {
                 settingsModal.classList.remove('active');
             }
         });
+
+        if (speedRange) {
+            speedRange.addEventListener('input', e => {
+                applySpeed(parseFloat(e.target.value), true);
+            });
+        }
+
+        applySpeed(speed, true);
     }
 
     function createRenderTarget(initialData) {
@@ -1111,9 +1443,53 @@
 
     // --- Initialization Logic ---
 
-    function getInitialPositions() {
+    function randomUnitVector() {
+        const u = Math.random();
+        const v = Math.random();
+        const theta = u * Math.PI * 2;
+        const phi = Math.acos(2 * v - 1);
+        return {
+            x: Math.sin(phi) * Math.cos(theta),
+            y: Math.sin(phi) * Math.sin(theta),
+            z: Math.cos(phi)
+        };
+    }
+
+    function randomInSphere(radius) {
+        const dir = randomUnitVector();
+        const dist = Math.cbrt(Math.random()) * radius;
+        return { x: dir.x * dist, y: dir.y * dist, z: dir.z * dist };
+    }
+
+    function randomInShell(minRadius, maxRadius) {
+        const dir = randomUnitVector();
+        const min3 = Math.pow(minRadius, 3);
+        const max3 = Math.pow(maxRadius, 3);
+        const dist = Math.cbrt(Math.random() * (max3 - min3) + min3);
+        return { x: dir.x * dist, y: dir.y * dist, z: dir.z * dist };
+    }
+
+    function randomNormal() {
+        return (Math.random() + Math.random() + Math.random() + Math.random() - 2.0) * 0.5;
+    }
+
+    function normalizeVec(x, y, z) {
+        const len = Math.sqrt(x * x + y * y + z * z) || 1;
+        return { x: x / len, y: y / len, z: z / len, len };
+    }
+
+    function crossVec(a, b) {
+        return {
+            x: a.y * b.z - a.z * b.y,
+            y: a.z * b.x - a.x * b.z,
+            z: a.x * b.y - a.y * b.x
+        };
+    }
+
+    function getDiskPositions() {
         const data = new Float32Array(PARTICLES * 4);
         const armOffset = (Math.PI * 2) / GALAXY_ARMS;
+        webHubs = [];
 
         for (let i = 0; i < PARTICLES; i++) {
             if (i < CORE_PARTICLES) {
@@ -1146,7 +1522,45 @@
         return data;
     }
 
-    function getInitialVelocities(posData) {
+    function getWebPositions() {
+        const data = new Float32Array(PARTICLES * 4);
+        webHubs = [];
+
+        const universeRadius = WEB_RADIUS * 1.2;
+        const heavyCount = Math.max(10, Math.floor(PARTICLES * 0.01));
+        const heavyIndices = new Set();
+        while (heavyIndices.size < heavyCount) {
+            heavyIndices.add(Math.floor(Math.random() * PARTICLES));
+        }
+
+        for (let i = 0; i < PARTICLES; i++) {
+            const isHeavy = heavyIndices.has(i);
+            const pos = isHeavy
+                ? randomInShell(WEB_RADIUS * 0.6, universeRadius * 1.1)
+                : randomInSphere(universeRadius);
+
+            let mass = 0.6 + Math.random() * 2.6;
+            if (isHeavy) {
+                mass = HUB_MASS_MIN + Math.random() * (HUB_MASS_MAX - HUB_MASS_MIN);
+                webHubs.push({ x: pos.x, y: pos.y, z: pos.z, mass });
+            } else if (Math.random() < 0.02) {
+                mass *= 3.5;
+            }
+
+            data[i * 4 + 0] = pos.x;
+            data[i * 4 + 1] = pos.y;
+            data[i * 4 + 2] = pos.z;
+            data[i * 4 + 3] = mass;
+        }
+
+        return data;
+    }
+
+    function getInitialPositions() {
+        return simulationMode === 'web' ? getWebPositions() : getDiskPositions();
+    }
+
+    function getDiskVelocities(posData) {
         const data = new Float32Array(PARTICLES * 4);
 
         for (let i = 0; i < PARTICLES; i++) {
@@ -1185,10 +1599,31 @@
         return data;
     }
 
+    function getWebVelocities(posData) {
+        const data = new Float32Array(PARTICLES * 4);
+        for (let i = 0; i < PARTICLES; i++) {
+            const mass = Math.max(posData[i * 4 + 3], 0.6);
+            const drift = 0.35 * (1.0 / (1.0 + mass * 0.04));
+
+            data[i * 4 + 0] = randomNormal() * drift;
+            data[i * 4 + 1] = randomNormal() * drift;
+            data[i * 4 + 2] = randomNormal() * drift;
+            data[i * 4 + 3] = 0; // w unused for velocity
+        }
+
+        return data;
+    }
+
+    function getInitialVelocities(posData) {
+        return simulationMode === 'web' ? getWebVelocities(posData) : getDiskVelocities(posData);
+    }
+
     function resetSimulation() {
         const p = getInitialPositions();
         const v = getInitialVelocities(p);
         for (let i = 0; i < PARTICLES; i++) particleMasses[i] = p[i * 4 + 3];
+        simTime = 0;
+        if (uiStats.simTimeVal) uiStats.simTimeVal.textContent = '0.0s';
         
         // Re-render initial data to buffers
         const rt1 = createRenderTarget(p);
@@ -1337,6 +1772,40 @@
         });
     }
 
+    function getSpawnVelocity(position, mass) {
+        if (simulationMode !== 'web') {
+            const planarDist = Math.sqrt(position.x * position.x + position.z * position.z);
+            if (planarDist < 0.001) {
+                return new THREE.Vector3(0, 0, 0);
+            }
+
+            const tangentX = -position.z / planarDist;
+            const tangentZ = position.x / planarDist;
+            const safeDist = Math.max(planarDist, 12.0);
+            const centralInfluence = CENTRAL_MASS + mass * 4.0;
+            const targetSpeed = Math.sqrt(GRAVITY_CONSTANT * centralInfluence / safeDist);
+
+            const vel = new THREE.Vector3(
+                tangentX * targetSpeed,
+                (Math.random() - 0.5) * 0.12 * targetSpeed,
+                tangentZ * targetSpeed
+            );
+
+            const radialJitter = (Math.random() - 0.5) * 0.15 * targetSpeed;
+            vel.x += (position.x / planarDist) * radialJitter;
+            vel.z += (position.z / planarDist) * radialJitter;
+
+            return vel;
+        }
+
+        const drift = 0.35 * (1.0 / (1.0 + mass * 0.04));
+        return new THREE.Vector3(
+            randomNormal() * drift,
+            randomNormal() * drift,
+            randomNormal() * drift
+        );
+    }
+
     function addParticleToSimulation(position, mass) {
         const EMPTY_THRESHOLD = 0.001;
 
@@ -1357,6 +1826,7 @@
 
         const col = slotIndex % TEXTURE_WIDTH;
         const row = Math.floor(slotIndex / TEXTURE_WIDTH);
+        const initialVelocity = getSpawnVelocity(position, mass);
 
         // Inject position into the current position buffer (write to the other buffer, then swap to avoid feedback)
         matInject.uniforms.texIn.value = rtPosition1.texture;
@@ -1370,55 +1840,84 @@
         // Inject velocity (zero) into the current velocity buffer
         matInject.uniforms.texIn.value = rtVelocity1.texture;
         matInject.uniforms.targetCoord.value.set(col, row);
-        matInject.uniforms.newValue.value.set(0, 0, 0, 0);
+        matInject.uniforms.newValue.value.set(initialVelocity.x, initialVelocity.y, initialVelocity.z, 0);
         renderer.setRenderTarget(rtVelocity2);
         renderer.render(sceneInject, cameraFBO);
         renderer.setRenderTarget(null);
         let tempVel = rtVelocity1; rtVelocity1 = rtVelocity2; rtVelocity2 = tempVel;
 
         // Ensure visuals + grid sample the updated current buffers immediately
-        gridUniforms.texPos.value = rtPosition1.texture;
+        if (gridUniforms && gridMesh) {
+            gridUniforms.texPos.value = rtPosition1.texture;
+        }
         particleUniforms.texPos.value = rtPosition1.texture;
         particleUniforms.texVel.value = rtVelocity1.texture;
 
         materialParticles.uniformsNeedUpdate = true;
-        gridMesh.material.uniformsNeedUpdate = true;
+        if (gridMesh) {
+            gridMesh.material.uniformsNeedUpdate = true;
+        }
 
         console.log(`Added particle at (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}) with mass ${mass} at slot ${slotIndex}`);
+    }
+
+    function stepSimulation(dt, nowSeconds) {
+        // 1. Update Velocity
+        meshVel.visible = true; meshPos.visible = false;
+        matVel.uniforms.texPos.value = rtPosition1.texture;
+        matVel.uniforms.texVel.value = rtVelocity1.texture;
+        matVel.uniforms.delta.value = dt;
+        matVel.uniforms.time.value = nowSeconds;
+
+        renderer.setRenderTarget(rtVelocity2);
+        renderer.render(sceneFBO, cameraFBO);
+
+        // 2. Update Position
+        meshVel.visible = false; meshPos.visible = true;
+        matPos.uniforms.texPos.value = rtPosition1.texture;
+        matPos.uniforms.texVel.value = rtVelocity2.texture; // Use new velocity
+        matPos.uniforms.delta.value = dt;
+
+        renderer.setRenderTarget(rtPosition2);
+        renderer.render(sceneFBO, cameraFBO);
+
+        renderer.setRenderTarget(null);
+
+        // Swap Buffers
+        let tempPos = rtPosition1; rtPosition1 = rtPosition2; rtPosition2 = tempPos;
+        let tempVel = rtVelocity1; rtVelocity1 = rtVelocity2; rtVelocity2 = tempVel;
+    }
+
+    function updateStats(now) {
+        if (!uiStats.fpsVal || !uiStats.simTimeVal) return;
+        frameCounter += 1;
+        const elapsed = now - lastFpsSample;
+        if (elapsed >= 500) {
+            const fps = (frameCounter * 1000) / elapsed;
+            uiStats.fpsVal.textContent = fps.toFixed(0);
+            uiStats.simTimeVal.textContent = `${simTime.toFixed(1)}s`;
+            frameCounter = 0;
+            lastFpsSample = now;
+        }
     }
 
     function animate() {
         requestAnimationFrame(animate);
 
-        const dt = 0.016 * speed; // Fixed time step scaled by slider
+        const now = performance.now();
+        const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
+        lastFrameTime = now;
+        const simDelta = deltaSeconds * speed;
 
-        if (speed > 0) {
-            // --- GPGPU STEP ---
-            
-            // 1. Update Velocity
-            meshVel.visible = true; meshPos.visible = false;
-            matVel.uniforms.texPos.value = rtPosition1.texture;
-            matVel.uniforms.texVel.value = rtVelocity1.texture;
-            matVel.uniforms.delta.value = dt;
-            matVel.uniforms.time.value = performance.now() * 0.001;
-            
-            renderer.setRenderTarget(rtVelocity2);
-            renderer.render(sceneFBO, cameraFBO);
-            
-            // 2. Update Position
-            meshVel.visible = false; meshPos.visible = true;
-            matPos.uniforms.texPos.value = rtPosition1.texture;
-            matPos.uniforms.texVel.value = rtVelocity2.texture; // Use new velocity
-            matPos.uniforms.delta.value = dt;
-            
-            renderer.setRenderTarget(rtPosition2);
-            renderer.render(sceneFBO, cameraFBO);
-            
-            renderer.setRenderTarget(null);
+        if (speed > 0 && simDelta > 0) {
+            const subSteps = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil(simDelta / TARGET_STEP)));
+            const stepDt = simDelta / subSteps;
+            const nowSeconds = now * 0.001;
 
-            // Swap Buffers
-            let tempPos = rtPosition1; rtPosition1 = rtPosition2; rtPosition2 = tempPos;
-            let tempVel = rtVelocity1; rtVelocity1 = rtVelocity2; rtVelocity2 = tempVel;
+            for (let i = 0; i < subSteps; i++) {
+                stepSimulation(stepDt, nowSeconds);
+                simTime += stepDt;
+            }
         }
 
         // --- RENDER STEP ---
@@ -1427,15 +1926,60 @@
         // Always update textures after buffer swap to ensure we're reading from the correct buffer
         particleUniforms.texPos.value = rtPosition1.texture;
         particleUniforms.texVel.value = rtVelocity1.texture;
-        particleUniforms.time.value = performance.now() * 0.001;
-        gridUniforms.texPos.value = rtPosition1.texture;
+        particleUniforms.time.value = now * 0.001;
+        if (gridUniforms && gridMesh) {
+            gridUniforms.texPos.value = rtPosition1.texture;
+        }
         
         // Force uniforms update every frame to ensure textures are current
         materialParticles.uniformsNeedUpdate = true;
-        gridMesh.material.uniformsNeedUpdate = true;
+        if (gridMesh) {
+            gridMesh.material.uniformsNeedUpdate = true;
+        }
+        
+        // Keyboard movement
+        const moveVector = new THREE.Vector3();
+        const moveSpeedFrame = moveSpeed * deltaSeconds * 60; // Normalize to 60fps
+        
+        // Get camera direction and right vector
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        const right = new THREE.Vector3();
+        right.crossVectors(forward, camera.up).normalize();
+        
+        // Forward/Backward (W/S or ArrowUp/ArrowDown)
+        if (keys['w'] || keys['arrowup']) {
+            moveVector.add(forward.clone().multiplyScalar(moveSpeedFrame));
+        }
+        if (keys['s'] || keys['arrowdown']) {
+            moveVector.add(forward.clone().multiplyScalar(-moveSpeedFrame));
+        }
+        
+        // Left/Right (A/D or ArrowLeft/ArrowRight)
+        if (keys['a'] || keys['arrowleft']) {
+            moveVector.add(right.clone().multiplyScalar(-moveSpeedFrame));
+        }
+        if (keys['d'] || keys['arrowright']) {
+            moveVector.add(right.clone().multiplyScalar(moveSpeedFrame));
+        }
+        
+        // Up/Down (Q/E or Space/Shift)
+        if (keys['q'] || keys[' '] || keys['space']) {
+            moveVector.add(camera.up.clone().multiplyScalar(moveSpeedFrame));
+        }
+        if (keys['e'] || keys['shift'] || keys['shiftleft'] || keys['shiftright']) {
+            moveVector.add(camera.up.clone().multiplyScalar(-moveSpeedFrame));
+        }
+        
+        // Apply movement
+        if (moveVector.length() > 0) {
+            camera.position.add(moveVector);
+            controls.target.add(moveVector); // Also move the orbit target to maintain relative position
+        }
         
         controls.update();
         renderer.render(scene, camera);
+        updateStats(now);
     }
 
     init();
