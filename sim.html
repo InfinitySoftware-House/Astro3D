@@ -61,11 +61,15 @@
 
 <div id="ui-layer">
     <h1>Spherical Gravity Engine</h1>
-    <div class="stat"><span>Particles</span> <span class="val">131,072</span></div>
+    <div class="stat"><span>Particles</span> <span class="val" id="particleCount">131,072</span></div>
     <div class="stat"><span>Grid Cells</span> <span class="val">4,096</span></div>
     <div class="stat"><span>FPS</span> <span class="val" id="fps">0</span></div>
     
     <div class="controls">
+        <label>Particle Count</label>
+        <input type="range" id="particleCountSlider" min="16384" max="262144" step="16384" value="131072">
+        <div style="font-size: 10px; color: #888; margin-top: 2px; text-align: center;" id="particleCountDisplay">131,072</div>
+        
         <label>Simulation Speed</label>
         <input type="range" id="speed" min="0" max="3" step="0.1" value="1">
         
@@ -89,15 +93,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-const TEXTURE_WIDTH = 362; 
-const PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
+let TEXTURE_WIDTH = 362; 
+let PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
 const GRID_DIM = 16;
 const GRID_TEX_WIDTH = 64; 
 
-const BOUNDS = 1000.0;
-const BOUNDS_HALF = BOUNDS / 2.0;
 const GRAVITY_CONSTANT = 8.0;
 const SOFTENING = 2.0;
+const UNIVERSE_SCALE = 4.0;
 
 // --- Shaders ---
 
@@ -113,7 +116,6 @@ const fsPosition = `
     uniform sampler2D texPos;
     uniform sampler2D texVel;
     uniform float delta;
-    uniform float boundsHalf;
     varying vec2 vUv;
 
     void main() {
@@ -124,24 +126,15 @@ const fsPosition = `
 
         pos += vel * delta;
 
-        // Spherical Soft Bounds (keeps particles in a large ball instead of a box)
-        float dist = length(pos);
-        if (dist > boundsHalf) {
-            vec3 dir = normalize(pos);
-            // Gentle push back
-            pos -= dir * (dist - boundsHalf) * 0.1;
-        }
-
         gl_FragColor = vec4(pos, mass);
     }
 `;
 
 const vsAggregator = `
     uniform sampler2D texPos;
-    uniform float boundsHalf;
-    uniform float bounds;
     uniform float gridDim; 
     uniform float gridTexWidth; 
+    uniform float gridCellSize;
     
     varying vec4 vParticleData;
 
@@ -149,7 +142,7 @@ const vsAggregator = `
         vec4 pData = texture2D(texPos, position.xy);
         vParticleData = pData;
         
-        vec3 gridCoord = floor((pData.xyz + boundsHalf) / bounds * gridDim);
+        vec3 gridCoord = floor(pData.xyz / gridCellSize);
         gridCoord = clamp(gridCoord, 0.0, gridDim - 1.0);
         
         float index = gridCoord.x + gridCoord.y * gridDim + gridCoord.z * gridDim * gridDim;
@@ -179,9 +172,8 @@ const fsVelocity = `
     uniform float delta;
     uniform float gravityConstant;
     uniform float softening;
-    uniform float bounds;
-    uniform float boundsHalf;
     uniform float gridDim; 
+    uniform float gridCellSize;
     
     varying vec2 vUv;
 
@@ -191,7 +183,7 @@ const fsVelocity = `
         vec3 myVel = texture2D(texVel, vUv).xyz;
         
         vec3 acc = vec3(0.0);
-        float cellSize = bounds / gridDim;
+        float cellSize = gridCellSize;
         
         // Loop over grid texture (64x64)
         for(float y = 0.5; y < 64.0; y += 1.0) {
@@ -213,6 +205,17 @@ const fsVelocity = `
             }
         }
         
+        vec3 expansionDir = normalize(myPos);
+        float distFromCenter = length(myPos);
+        
+        // Hubble Constant approximation (adjust 0.05 to change expansion strength)
+        float expansionForce = 0.01 * distFromCenter; 
+        
+        // Only apply expansion if far from center (optional, keeps center dense)
+        if (distFromCenter > 100.0) {
+            acc += expansionDir * expansionForce;
+        }
+
         myVel += acc * delta;
         myVel *= 0.998; // Less damping for space feel
         
@@ -277,6 +280,7 @@ let stats = { fps: 0, ms: 0 };
 let lastTime = 0;
 let frames = 0;
 let simSpeed = 1.0;
+const keys = {}; // Track pressed keys for continuous movement
 
 init();
 animate();
@@ -294,12 +298,18 @@ function init() {
     }
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 8000);
-    camera.position.set(0, 200, 900);
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 8000 * UNIVERSE_SCALE);
+    camera.position.set(0, 200 * UNIVERSE_SCALE, 900 * UNIVERSE_SCALE);
     
     controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
     controls.autoRotate = false;
+    // Only enable controls when left mouse button is pressed
+    controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: null
+    };
     //controls.autoRotateSpeed = 0.3;
 
     sceneSim = new THREE.Scene();
@@ -313,16 +323,16 @@ function init() {
     setupUI();
     window.addEventListener('resize', onResize);
     
-    // Keyboard Flight
+    // Continuous WASD movement tracking
     window.addEventListener('keydown', (e) => {
-        const s = 30;
-        const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
-        const rgt = new THREE.Vector3().crossVectors(fwd, camera.up);
-        if(e.key=='w') camera.position.addScaledVector(fwd, s);
-        if(e.key=='s') camera.position.addScaledVector(fwd, -s);
-        if(e.key=='a') camera.position.addScaledVector(rgt, -s);
-        if(e.key=='d') camera.position.addScaledVector(rgt, s);
-        controls.target.copy(camera.position).add(fwd);
+        keys[e.key.toLowerCase()] = true;
+    });
+    window.addEventListener('keyup', (e) => {
+        keys[e.key.toLowerCase()] = false;
+    });
+    window.addEventListener('blur', () => {
+        // Clear keys when window loses focus
+        Object.keys(keys).forEach(key => keys[key] = false);
     });
 }
 
@@ -344,59 +354,107 @@ function initData(mode) {
     const dataPos = new Float32Array(PARTICLES * 4);
     const dataVel = new Float32Array(PARTICLES * 4);
     
+    // --- RANDOMIZED GENERATION PARAMETERS ---
+    // Generate random centers (Attractors) to break the "perfect sphere" look
+    const numAttractors = Math.floor(Math.random() * 5) + 3; // 3 to 7 random centers
+    const attractors = [];
+    for(let k=0; k<numAttractors; k++) {
+        attractors.push({
+            pos: new THREE.Vector3(
+                (Math.random()-0.5) * 600 * UNIVERSE_SCALE, // Scale up
+                (Math.random()-0.5) * 600 * UNIVERSE_SCALE,
+                (Math.random()-0.5) * 600 * UNIVERSE_SCALE
+            ),
+            strength: Math.random() // How strong this cluster is
+        });
+    }
+
+    // Randomize the "Noise Scale" so the web is sometimes dense, sometimes loose
+    const noiseScale = 0.01 + Math.random() * 0.03; 
+    const noiseOffset = new THREE.Vector3(Math.random()*100, Math.random()*100, Math.random()*100);
+
     for (let i = 0; i < PARTICLES; i++) {
         let x, y, z, m, vx, vy, vz;
         
         if (mode === 'web') {
-            // --- SPHERICAL COSMIC WEB WITH SUPER-MASSIVE ANCHORS ---
-            
-            // 1. Uniform Spherical Distribution
-            const r = Math.cbrt(Math.random()) * 480.0; 
-            const theta = Math.random() * Math.PI * 2;
-            const phi = Math.acos(2 * Math.random() - 1);
-            
-            x = r * Math.sin(phi) * Math.cos(theta);
-            y = r * Math.sin(phi) * Math.sin(theta);
-            z = r * Math.cos(phi);
-            
-            // 2. Trigonometric Lattice Noise
-            const scale = 0.02;
-            const noise = Math.cos(x*scale) + Math.cos(y*scale) + Math.cos(z*scale);
-            
-            // Default velocity
-            vx = (Math.random()-0.5) * 1.5;
-            vy = (Math.random()-0.5) * 1.5;
-            vz = (Math.random()-0.5) * 1.5;
+            // --- PROCEDURAL ORGANIC WEB ---
 
-            // 3. Mass Logic
+            // 1. Select a random attractor to influence this particle
+            // We blend between attractors to create "Filaments" (bridges)
+            const attrIndex = Math.floor(Math.random() * numAttractors);
+            const targetA = attractors[attrIndex];
+            const targetB = attractors[(attrIndex + 1) % numAttractors]; // Connect to next one
             
-            // A. Super-Massive Particles (The "Anchors")
-            // 0.05% chance (creates approx 60-70 massive bodies in 131k particles)
-            if (Math.random() < 0.0005) {
-                m = 1000.0 + Math.random() * 150.0; // Huge mass (Normal is ~1.0)
-                
-                // Slow them down significantly so the web forms AROUND them
-                vx *= 0.05; 
-                vy *= 0.05; 
-                vz *= 0.05;
-                
-                // Optional: Push them slightly apart so two giants don't spawn on top of each other
-                x *= 1.05; y *= 1.05; z *= 1.05;
-            } 
-            // B. Normal Web Logic
-            else if (noise > 0.5) {
-                // Void particles (light, pushed chaotic)
-                x += (Math.random()-0.5) * 40;
-                y += (Math.random()-0.5) * 40;
-                z += (Math.random()-0.5) * 40;
-                m = 0.2; 
+            // Lerp factor (where on the bridge are we?)
+            const t = Math.random(); 
+            // Add a "Curve" to the bridge so lines aren't perfectly straight
+            const curve = Math.sin(t * Math.PI) * 200.0;
+            
+            // Base Position on the Filament
+            let px = (1-t)*targetA.pos.x + t*targetB.pos.x;
+            let py = (1-t)*targetA.pos.y + t*targetB.pos.y;
+            let pz = (1-t)*targetA.pos.z + t*targetB.pos.z;
+
+            // 2. Add Dispersion (Thickness of the filament)
+            // Use Trigonometric noise with RANDOMIZED offsets so it's never the same grid
+            const scatter = (80.0 + (Math.random() * 50.0)) * UNIVERSE_SCALE;
+            
+            // "Fuzzy" the position
+            let nx = px + (Math.random()-0.5) * scatter;
+            let ny = py + (Math.random()-0.5) * scatter;
+            let nz = pz + (Math.random()-0.5) * scatter;
+            
+            // Apply the randomized noise function for density texture
+            const nVal = Math.cos((nx+noiseOffset.x)*noiseScale) + 
+                         Math.cos((ny+noiseOffset.y)*noiseScale) + 
+                         Math.cos((nz+noiseOffset.z)*noiseScale);
+
+            x = nx; y = ny; z = nz;
+
+            // 3. Velocity / Orbit
+            // Instead of orbiting (0,0,0), orbit the NEAREST Attractor
+            // This prevents the "Giant Swirl" look
+            let posVec = new THREE.Vector3(x, y, z);
+            let closestAttractor = targetA.pos; // Approximation
+            let relPos = new THREE.Vector3().subVectors(posVec, closestAttractor);
+            let dist = relPos.length();
+            
+            // Create a rotation axis perpendicular to the filament
+            let axis = new THREE.Vector3(0, 1, 0).applyEuler(new THREE.Euler(Math.random(), Math.random(), 0));
+            let vel = new THREE.Vector3().crossVectors(relPos, axis).normalize();
+            
+            // Slower speeds = better structure formation
+            let orbitalSpeed = Math.sqrt(GRAVITY_CONSTANT * 500.0 / (dist + 10.0)); 
+            vel.multiplyScalar(orbitalSpeed);
+
+            vx = vel.x + (Math.random()-0.5) * 2.0;
+            vy = vel.y + (Math.random()-0.5) * 2.0;
+            vz = vel.z + (Math.random()-0.5) * 2.0;
+
+            // 4. Mass Distribution
+            // High density areas (where noise > 0) get higher mass
+            if (nVal > 0.5) {
+                m = Math.random() * 3.0 + 1.0; // Heavy filaments
+                x *= 0.95; y *= 0.95; z *= 0.95; // Compress slightly
             } else {
-                // Filament particles (heavier, tighter)
-                x *= 0.98; y *= 0.98; z *= 0.98;
-                m = Math.random() * 4.0 + 1.0; 
+                m = 0.2; // Light void particles
+                // Push void particles further out
+                x += (Math.random()-0.5) * 50;
+                y += (Math.random()-0.5) * 50;
+                z += (Math.random()-0.5) * 50;
             }
             
+            // Occasional Super-Massive Black Holes at the Attractors
+            if (Math.random() < 0.0002) {
+                m = 500.0 + Math.random() * 500.0;
+                x = targetA.pos.x + (Math.random()-0.5)*20;
+                y = targetA.pos.y + (Math.random()-0.5)*20;
+                z = targetA.pos.z + (Math.random()-0.5)*20;
+                vx *= 0.1; vy *= 0.1; vz *= 0.1; // Anchors are stable
+            }
+
         } else if (mode === 'galaxy' || mode === 'collision') {
+            // Keep your existing galaxy logic, it works well for that mode
             const armCount = 2 + Math.floor(Math.random()*2);
             const dist = Math.random();
             const angle = dist * Math.PI * 4 * armCount + (Math.random()*0.5);
@@ -408,7 +466,7 @@ function initData(mode) {
             
             if (mode === 'collision' && i > PARTICLES/2) {
                 x += 500; z -= 200;
-                let t = x; x = z; z = -t; // Rotate
+                let t = x; x = z; z = -t; 
             }
 
             m = Math.random() + 1.0;
@@ -419,7 +477,6 @@ function initData(mode) {
             vz = Math.cos(angle) * vMag;
             vy = 0;
             
-            // Random scatter
             x += (Math.random()-0.5)*10;
             z += (Math.random()-0.5)*10;
         }
@@ -429,6 +486,7 @@ function initData(mode) {
         dataVel[idx] = vx; dataVel[idx+1] = vy; dataVel[idx+2] = vz; dataVel[idx+3] = 0;
     }
     
+    // --- TEXTURE UPDATES REMAIN THE SAME ---
     const texPos = new THREE.DataTexture(dataPos, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
     texPos.needsUpdate = true;
     const texVel = new THREE.DataTexture(dataVel, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
@@ -445,22 +503,21 @@ function initData(mode) {
     sceneSim.remove(mesh);
     tmp.dispose(); texPos.dispose(); texVel.dispose();
 }
-
 function initMaterials() {
     matPos = new THREE.ShaderMaterial({
-        uniforms: { texPos: {value:null}, texVel: {value:null}, delta: {value:0.0}, boundsHalf: {value:BOUNDS_HALF} },
+        uniforms: { texPos: {value:null}, texVel: {value:null}, delta: {value:0.0} },
         vertexShader: vsPass, fragmentShader: fsPosition
     });
     matVel = new THREE.ShaderMaterial({
         uniforms: { 
             texPos: {value:null}, texVel: {value:null}, texGrid: {value:null}, delta: {value:0.0},
-            gravityConstant: {value:GRAVITY_CONSTANT}, softening: {value:SOFTENING},
-            bounds: {value:BOUNDS}, boundsHalf: {value:BOUNDS_HALF}, gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}
+            gravityConstant: {value: GRAVITY_CONSTANT * UNIVERSE_SCALE},
+            gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:100.0 * UNIVERSE_SCALE}
         },
         vertexShader: vsPass, fragmentShader: fsVelocity
     });
     matGrid = new THREE.ShaderMaterial({
-        uniforms: { texPos: {value:null}, bounds: {value:BOUNDS}, boundsHalf: {value:BOUNDS_HALF}, gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH} },
+        uniforms: { texPos: {value:null}, gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:100.0 * UNIVERSE_SCALE} },
         vertexShader: vsAggregator, fragmentShader: fsAggregator, blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false
     });
     matDisplay = new THREE.ShaderMaterial({
@@ -487,10 +544,62 @@ function initParticles() {
     scene.add(new THREE.Points(geo, matDisplay)); // Visual Points
 }
 
+function formatNumber(num) {
+    return num.toLocaleString('en-US');
+}
+
+function updateParticleCount(desiredCount) {
+    // Calculate texture width from desired particle count (square root, rounded)
+    TEXTURE_WIDTH = Math.round(Math.sqrt(desiredCount));
+    PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
+    
+    // Update UI display
+    document.getElementById('particleCount').textContent = formatNumber(PARTICLES);
+    document.getElementById('particleCountDisplay').textContent = formatNumber(PARTICLES);
+    
+    // Reinitialize simulation with new particle count
+    reinitializeSimulation();
+}
+
+function reinitializeSimulation() {
+    // Dispose old resources
+    if (fboPos1) fboPos1.dispose();
+    if (fboPos2) fboPos2.dispose();
+    if (fboVel1) fboVel1.dispose();
+    if (fboVel2) fboVel2.dispose();
+    if (fboGrid) fboGrid.dispose();
+    
+    // Clear scenes
+    while(sceneSim.children.length > 0) sceneSim.remove(sceneSim.children[0]);
+    while(sceneGrid.children.length > 0) sceneGrid.remove(sceneGrid.children[0]);
+    while(scene.children.length > 0) {
+        const obj = scene.children[0];
+        if (obj instanceof THREE.Points) {
+            scene.remove(obj);
+            obj.geometry.dispose();
+            obj.material.dispose();
+        } else {
+            scene.remove(obj);
+        }
+    }
+    
+    // Reinitialize
+    initFBOs();
+    initParticles();
+}
+
 function setupUI() {
+    // Initialize particle count display
+    document.getElementById('particleCount').textContent = formatNumber(PARTICLES);
+    document.getElementById('particleCountDisplay').textContent = formatNumber(PARTICLES);
+    
     document.getElementById('speed').addEventListener('input', e => simSpeed = parseFloat(e.target.value));
     document.getElementById('configSelect').addEventListener('change', e => { simMode = e.target.value; initData(simMode); });
     document.getElementById('resetBtn').addEventListener('click', () => { initData(simMode); });
+    document.getElementById('particleCountSlider').addEventListener('input', e => {
+        const desiredCount = parseInt(e.target.value);
+        updateParticleCount(desiredCount);
+    });
 }
 
 function onResize() {
@@ -538,6 +647,23 @@ function animate() {
     renderer.setRenderTarget(null);
     matDisplay.uniforms.texPos.value = fboPos1.texture;
     matDisplay.uniforms.texVel.value = fboVel1.texture;
+    
+    // Continuous WASD movement
+    const moveSpeed = 200 * dt; // Speed per second
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    const rgt = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+    
+    if (keys['w']) camera.position.addScaledVector(fwd, moveSpeed);
+    if (keys['s']) camera.position.addScaledVector(fwd, -moveSpeed);
+    if (keys['a']) camera.position.addScaledVector(rgt, -moveSpeed);
+    if (keys['d']) camera.position.addScaledVector(rgt, moveSpeed);
+    
+    // Update controls target to maintain camera direction
+    if (keys['w'] || keys['s'] || keys['a'] || keys['d']) {
+        controls.target.copy(camera.position).add(fwd);
+    }
+    
     controls.update();
     renderer.render(scene, camera);
 }
