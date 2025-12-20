@@ -3,44 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPU Gravity - Spherical Cosmic Web</title>
+    <title>Cosmic Web - N-Body Simulation</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
+        body { margin: 0; overflow: hidden; background-color: #050505; font-family: 'Segoe UI', sans-serif; }
         canvas { display: block; }
         
         #ui-layer {
             position: absolute;
             top: 20px;
             left: 20px;
-            width: 300px;
-            padding: 15px;
-            background: rgba(10, 12, 16, 0.85);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            backdrop-filter: blur(10px);
+            width: 320px;
+            padding: 20px;
+            background: rgba(15, 18, 25, 0.9);
+            border: 1px solid rgba(0, 229, 255, 0.2);
+            border-left: 3px solid #00e5ff;
+            border-radius: 4px;
+            backdrop-filter: blur(12px);
             color: #ccc;
             user-select: none;
-            pointer-events: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
 
-        h1 { margin: 0 0 10px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #00e5ff; }
-        .stat { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
-        .val { font-family: 'Courier New', monospace; color: #fff; }
+        h1 { margin: 0 0 15px 0; font-size: 16px; text-transform: uppercase; letter-spacing: 2px; color: #00e5ff; font-weight: 800; }
+        .stat { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; color: #8a9ba8; }
+        .val { font-family: 'Courier New', monospace; color: #fff; font-weight: bold; }
 
-        .controls { margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px; }
-        label { display: block; font-size: 11px; color: #888; margin-bottom: 5px; margin-top: 10px; }
+        .controls { margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; }
+        label { display: block; font-size: 11px; color: #00e5ff; margin-bottom: 6px; margin-top: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
         
-        input[type="range"] { width: 100%; height: 4px; background: #333; border-radius: 2px; -webkit-appearance: none; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: #00e5ff; border-radius: 50%; cursor: pointer; }
+        input[type="range"] { width: 100%; height: 4px; background: #333; border-radius: 2px; -webkit-appearance: none; margin-bottom: 5px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: #fff; border-radius: 50%; cursor: pointer; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
         
-        select { width: 100%; background: #111; color: #eee; border: 1px solid #333; padding: 5px; border-radius: 4px; font-size: 12px; }
-        
+        select { width: 100%; background: #111; color: #fff; border: 1px solid #333; padding: 8px; border-radius: 4px; font-size: 12px; font-family: 'Courier New', monospace; outline: none; }
+        select:focus { border-color: #00e5ff; }
+
         button {
-            width: 100%; margin-top: 10px; padding: 8px; background: #222; border: 1px solid #444; 
-            color: #00e5ff; font-size: 11px; text-transform: uppercase; font-weight: bold; cursor: pointer;
-            transition: background 0.2s;
+            width: 100%; margin-top: 15px; padding: 10px; background: rgba(0, 229, 255, 0.1); border: 1px solid #00e5ff; 
+            color: #00e5ff; font-size: 11px; text-transform: uppercase; font-weight: bold; cursor: pointer; letter-spacing: 1px;
+            transition: all 0.2s;
         }
-        button:hover { background: #333; }
+        button:hover { background: #00e5ff; color: #000; box-shadow: 0 0 15px rgba(0, 229, 255, 0.4); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.recording { background: #ff3333; border-color: #ff3333; color: #fff; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        
+        input[type="number"] { width: 100%; background: #111; color: #fff; border: 1px solid #333; padding: 8px; border-radius: 4px; font-size: 12px; font-family: 'Courier New', monospace; outline: none; margin-bottom: 5px; }
+        input[type="number"]:focus { border-color: #00e5ff; }
+        
+        #recordingStatus { font-size: 10px; color: #ff3333; text-align: center; margin-top: 8px; display: none; font-family: monospace; }
         
         #warning {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -60,29 +70,38 @@
 <body>
 
 <div id="ui-layer">
-    <h1>Spherical Gravity Engine</h1>
-    <div class="stat"><span>Particles</span> <span class="val" id="particleCount">131,072</span></div>
-    <div class="stat"><span>Grid Cells</span> <span class="val">4,096</span></div>
-    <div class="stat"><span>FPS</span> <span class="val" id="fps">0</span></div>
+    <h1>Cosmic N-Body Sim</h1>
+    <div class="stat"><span>PARTICLES</span> <span class="val" id="particleCount">131,072</span></div>
+    <div class="stat"><span>COMPUTE GRID</span> <span class="val">64x64x16</span></div>
+    <div class="stat"><span>SIMULATION TIME</span> <span class="val" id="fps">0 FPS</span></div>
     
     <div class="controls">
-        <label>Particle Count</label>
-        <input type="range" id="particleCountSlider" min="16384" max="262144" step="16384" value="131072">
-        <div style="font-size: 10px; color: #888; margin-top: 2px; text-align: center;" id="particleCountDisplay">131,072</div>
+        <label>Particle Density (Reset Required)</label>
+        <input type="range" id="particleCountSlider" min="16384" max="5000000" step="50000" value="131072">
+        <div style="font-size: 10px; color: #666; text-align: right;" id="particleCountDisplay">131,072</div>
         
-        <label>Simulation Speed</label>
-        <input type="range" id="speed" min="0" max="3" step="0.1" value="1">
+        <label>Time Step (Speed)</label>
+        <input type="range" id="speed" min="0" max="2" step="0.05" value="0.2">
         
-        <label>Configuration</label>
+        <label>Initial Conditions</label>
         <select id="configSelect">
-            <option value="web">Cosmic Web (Spherical)</option>
-            <option value="galaxy">Spiral Galaxy</option>
-            <option value="collision">Galaxy Collision</option>
+            <option value="web">CDM Cosmic Web (Filaments)</option>
+            <option value="voids">Deep Field Voids (Bubbles)</option>
+            <option value="collision">Galactic Merger</option>
+            <option value="cluster">Globular Cluster</option>
         </select>
 
-        <button id="resetBtn">Reset Simulation</button>
-        <div style="font-size: 10px; color: #555; margin-top: 10px; text-align: center;">
-            WASD to Move | Drag to Rotate
+        <button id="resetBtn">Re-Initialize Simulation</button>
+        
+        <div style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+            <label>Video Recording Duration (minutes)</label>
+            <input type="number" id="recordingDuration" min="0.1" max="60" step="0.1" value="5">
+            <button id="recordBtn">Start Recording</button>
+            <div id="recordingStatus"></div>
+        </div>
+        
+        <div style="font-size: 10px; color: #445; margin-top: 15px; text-align: center; font-family: monospace;">
+            [WASD] Navigate | [L-Click] Rotate
         </div>
     </div>
 </div>
@@ -98,9 +117,9 @@ let PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
 const GRID_DIM = 16;
 const GRID_TEX_WIDTH = 64; 
 
-const GRAVITY_CONSTANT = 8.0;
-const SOFTENING = 2.0;
-const UNIVERSE_SCALE = 4.0;
+const GRAVITY_CONSTANT = 6.0;
+const SOFTENING = 2.5;
+const UNIVERSE_SCALE = 5.0; // Larger universe for more "Sim" feel
 
 // --- Shaders ---
 
@@ -205,29 +224,33 @@ const fsVelocity = `
             }
         }
         
-        vec3 expansionDir = normalize(myPos);
+        // Dark Energy / Hubble Expansion
         float distFromCenter = length(myPos);
+        vec3 expansionDir = normalize(myPos);
         
-        // Hubble Constant approximation (adjust 0.05 to change expansion strength)
-        float expansionForce = 0.01 * distFromCenter; 
+        // This force counteracts gravity at large scales, stabilizing the web
+        float expansionForce = 0.0005 * distFromCenter; 
         
-        // Only apply expansion if far from center (optional, keeps center dense)
-        if (distFromCenter > 100.0) {
-            acc += expansionDir * expansionForce;
+        // Drag (Simulate Interstellar Medium friction slightly)
+        myVel *= 0.999; 
+
+        if (distFromCenter > 200.0) {
+             acc += expansionDir * expansionForce;
         }
 
         myVel += acc * delta;
-        myVel *= 0.998; // Less damping for space feel
         
         gl_FragColor = vec4(myVel, 0.0);
     }
 `;
 
+// VISUAL SHADER: Adds "Temperature" coloring based on local density/energy
 const vsVisual = `
     uniform sampler2D texPos;
     uniform sampler2D texVel;
     varying vec3 vColor;
     varying float vAlpha;
+    varying float vSize;
 
     void main() {
         vec4 posData = texture2D(texPos, position.xy);
@@ -240,19 +263,37 @@ const vsVisual = `
         gl_Position = projectionMatrix * mvPosition;
         
         float dist = -mvPosition.z;
-        gl_PointSize = (400.0 / dist) * max(0.5, mass * 0.4);
-        
         float speed = length(vel);
-        float energy = speed * 0.05;
         
-        vec3 c1 = vec3(0.1, 0.3, 0.6); // Deep Blue
-        vec3 c2 = vec3(0.6, 0.8, 1.0); // Cyan/White
-        vec3 c3 = vec3(1.0, 0.5, 0.2); // Red/Orange
+        // Simulation Color Palette (Heatmap)
+        // Cold/Slow/Void = Deep Purple/Blue
+        // Medium/Filament = Cyan/Green
+        // Hot/Cluster = Yellow/White
         
-        if (energy < 0.5) vColor = mix(c1, c2, energy * 2.0);
-        else vColor = mix(c2, c3, (energy - 0.5) * 2.0);
+        vec3 cVoid = vec3(0.05, 0.0, 0.2);
+        vec3 cFilament = vec3(0.0, 0.8, 1.0);
+        vec3 cCluster = vec3(1.0, 0.9, 0.7);
         
-        vAlpha = min(1.0, mass * 0.5 + 0.2);
+        // Calculate "Energy" for coloring
+        float energy = speed * 0.15 + (mass * 0.05);
+        
+        if (energy < 0.5) {
+            vColor = mix(cVoid, cFilament, energy * 2.0);
+        } else {
+            vColor = mix(cFilament, cCluster, min(1.0, (energy - 0.5) * 2.0));
+        }
+
+        // Highlight super-heavy particles (Black Holes/Cluster Cores)
+        if (mass > 50.0) {
+            vColor = vec3(1.0, 1.0, 1.0);
+            gl_PointSize = (1200.0 / dist);
+            vAlpha = 1.0;
+        } else {
+            gl_PointSize = (300.0 / dist) * max(0.5, mass * 0.5);
+            vAlpha = min(0.8, mass * 0.3 + 0.3);
+        }
+        
+        vSize = gl_PointSize;
     }
 `;
 
@@ -263,24 +304,34 @@ const fsVisual = `
         vec2 coord = gl_PointCoord - vec2(0.5);
         float distSq = dot(coord, coord);
         if (distSq > 0.25) discard;
+        
         float strength = 1.0 - (distSq * 4.0);
-        strength = pow(strength, 1.5);
+        strength = pow(strength, 2.0); // Sharper points
+        
         gl_FragColor = vec4(vColor, vAlpha * strength);
     }
 `;
 
 let renderer, scene, camera, controls;
-let simMode = 'web'; // Default to web
+let simMode = 'web'; 
 
 let fboPos1, fboPos2, fboVel1, fboVel2, fboGrid;
-let sceneSim, cameraSim, sceneGrid, geometryQuad, particleMesh;
+let sceneSim, cameraSim, sceneGrid, geometryQuad;
 let matPos, matVel, matGrid, matDisplay;
 
 let stats = { fps: 0, ms: 0 };
 let lastTime = 0;
 let frames = 0;
-let simSpeed = 1.0;
-const keys = {}; // Track pressed keys for continuous movement
+let simSpeed = 0.2; // Slower default for majesty
+const keys = {};
+
+// Video recording variables
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingStartTime = 0;
+let recordingDuration = 0;
+let recordingTimer = null;
+let isRecording = false; 
 
 init();
 animate();
@@ -298,19 +349,20 @@ function init() {
     }
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 8000 * UNIVERSE_SCALE);
-    camera.position.set(0, 200 * UNIVERSE_SCALE, 900 * UNIVERSE_SCALE);
+    // Dark background for deep space
+    scene.fog = new THREE.FogExp2(0x050505, 0.0002);
+    
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000 * UNIVERSE_SCALE);
+    camera.position.set(0, 0, 1200 * UNIVERSE_SCALE); // Start further back
     
     controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
-    controls.autoRotate = false;
-    // Only enable controls when left mouse button is pressed
+    controls.dampingFactor = 0.05;
     controls.mouseButtons = {
         LEFT: THREE.MOUSE.ROTATE,
         MIDDLE: THREE.MOUSE.DOLLY,
-        RIGHT: null
+        RIGHT: THREE.MOUSE.PAN
     };
-    //controls.autoRotateSpeed = 0.3;
 
     sceneSim = new THREE.Scene();
     sceneGrid = new THREE.Scene();
@@ -323,17 +375,9 @@ function init() {
     setupUI();
     window.addEventListener('resize', onResize);
     
-    // Continuous WASD movement tracking
-    window.addEventListener('keydown', (e) => {
-        keys[e.key.toLowerCase()] = true;
-    });
-    window.addEventListener('keyup', (e) => {
-        keys[e.key.toLowerCase()] = false;
-    });
-    window.addEventListener('blur', () => {
-        // Clear keys when window loses focus
-        Object.keys(keys).forEach(key => keys[key] = false);
-    });
+    window.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
+    window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
+    window.addEventListener('blur', () => Object.keys(keys).forEach(k => keys[k] = false));
 }
 
 function createTexture() {
@@ -350,143 +394,205 @@ function initFBOs() {
     });
 }
 
+// --- CORE GENERATION ALGORITHM ---
 function initData(mode) {
     const dataPos = new Float32Array(PARTICLES * 4);
     const dataVel = new Float32Array(PARTICLES * 4);
     
-    // --- RANDOMIZED GENERATION PARAMETERS ---
-    // Generate random centers (Attractors) to break the "perfect sphere" look
-    const numAttractors = Math.floor(Math.random() * 5) + 3; // 3 to 7 random centers
-    const attractors = [];
-    for(let k=0; k<numAttractors; k++) {
-        attractors.push({
-            pos: new THREE.Vector3(
-                (Math.random()-0.5) * 600 * UNIVERSE_SCALE, // Scale up
-                (Math.random()-0.5) * 600 * UNIVERSE_SCALE,
-                (Math.random()-0.5) * 600 * UNIVERSE_SCALE
-            ),
-            strength: Math.random() // How strong this cluster is
-        });
-    }
-
-    // Randomize the "Noise Scale" so the web is sometimes dense, sometimes loose
-    const noiseScale = 0.01 + Math.random() * 0.03; 
-    const noiseOffset = new THREE.Vector3(Math.random()*100, Math.random()*100, Math.random()*100);
-
-    for (let i = 0; i < PARTICLES; i++) {
-        let x, y, z, m, vx, vy, vz;
+    // Config vars
+    const spread = 800 * UNIVERSE_SCALE;
+    
+    if (mode === 'web' || mode === 'voids') {
+        // --- ALGORITHM: PROCEDURAL FILAMENTS & VOIDS ---
         
-        if (mode === 'web') {
-            // --- PROCEDURAL ORGANIC WEB ---
+        // 1. Generate Structural Nodes (Galaxy Clusters)
+        const nodeCount = 24;
+        const nodes = [];
+        for(let i=0; i<nodeCount; i++) {
+            nodes.push(new THREE.Vector3(
+                (Math.random()-0.5) * spread,
+                (Math.random()-0.5) * spread,
+                (Math.random()-0.5) * spread
+            ));
+        }
 
-            // 1. Select a random attractor to influence this particle
-            // We blend between attractors to create "Filaments" (bridges)
-            const attrIndex = Math.floor(Math.random() * numAttractors);
-            const targetA = attractors[attrIndex];
-            const targetB = attractors[(attrIndex + 1) % numAttractors]; // Connect to next one
-            
-            // Lerp factor (where on the bridge are we?)
-            const t = Math.random(); 
-            // Add a "Curve" to the bridge so lines aren't perfectly straight
-            const curve = Math.sin(t * Math.PI) * 200.0;
-            
-            // Base Position on the Filament
-            let px = (1-t)*targetA.pos.x + t*targetB.pos.x;
-            let py = (1-t)*targetA.pos.y + t*targetB.pos.y;
-            let pz = (1-t)*targetA.pos.z + t*targetB.pos.z;
+        // 2. Generate Connectivity (Edges/Filaments)
+        // Simple nearest-neighbor graph to create web
+        const filaments = [];
+        for(let i=0; i<nodeCount; i++) {
+            // Connect to 2 or 3 nearest neighbors
+            const dists = nodes.map((n, idx) => ({ idx, dist: nodes[i].distanceTo(n) }));
+            dists.sort((a,b) => a.dist - b.dist);
+            // Connect to closest 2 (skipping self at 0)
+            for(let k=1; k<=3; k++) {
+                if (dists[k]) filaments.push({ start: nodes[i], end: nodes[dists[k].idx] });
+            }
+        }
 
-            // 2. Add Dispersion (Thickness of the filament)
-            // Use Trigonometric noise with RANDOMIZED offsets so it's never the same grid
-            const scatter = (80.0 + (Math.random() * 50.0)) * UNIVERSE_SCALE;
+        for (let i = 0; i < PARTICLES; i++) {
+            let x, y, z, m, vx, vy, vz;
             
-            // "Fuzzy" the position
-            let nx = px + (Math.random()-0.5) * scatter;
-            let ny = py + (Math.random()-0.5) * scatter;
-            let nz = pz + (Math.random()-0.5) * scatter;
-            
-            // Apply the randomized noise function for density texture
-            const nVal = Math.cos((nx+noiseOffset.x)*noiseScale) + 
-                         Math.cos((ny+noiseOffset.y)*noiseScale) + 
-                         Math.cos((nz+noiseOffset.z)*noiseScale);
+            const isBackround = Math.random() < 0.05; // 5% background radiation particles
 
-            x = nx; y = ny; z = nz;
-
-            // 3. Velocity / Orbit
-            // Instead of orbiting (0,0,0), orbit the NEAREST Attractor
-            // This prevents the "Giant Swirl" look
-            let posVec = new THREE.Vector3(x, y, z);
-            let closestAttractor = targetA.pos; // Approximation
-            let relPos = new THREE.Vector3().subVectors(posVec, closestAttractor);
-            let dist = relPos.length();
-            
-            // Create a rotation axis perpendicular to the filament
-            let axis = new THREE.Vector3(0, 1, 0).applyEuler(new THREE.Euler(Math.random(), Math.random(), 0));
-            let vel = new THREE.Vector3().crossVectors(relPos, axis).normalize();
-            
-            // Slower speeds = better structure formation
-            let orbitalSpeed = Math.sqrt(GRAVITY_CONSTANT * 500.0 / (dist + 10.0)); 
-            vel.multiplyScalar(orbitalSpeed);
-
-            vx = vel.x + (Math.random()-0.5) * 2.0;
-            vy = vel.y + (Math.random()-0.5) * 2.0;
-            vz = vel.z + (Math.random()-0.5) * 2.0;
-
-            // 4. Mass Distribution
-            // High density areas (where noise > 0) get higher mass
-            if (nVal > 0.5) {
-                m = Math.random() * 3.0 + 1.0; // Heavy filaments
-                x *= 0.95; y *= 0.95; z *= 0.95; // Compress slightly
+            if (isBackround && mode !== 'voids') {
+                // Randomly scattered particles (Voids aren't perfectly empty)
+                x = (Math.random()-0.5) * spread * 1.5;
+                y = (Math.random()-0.5) * spread * 1.5;
+                z = (Math.random()-0.5) * spread * 1.5;
+                m = 0.5; // Light
+                vx = vy = vz = 0;
             } else {
-                m = 0.2; // Light void particles
-                // Push void particles further out
-                x += (Math.random()-0.5) * 50;
-                y += (Math.random()-0.5) * 50;
-                z += (Math.random()-0.5) * 50;
-            }
-            
-            // Occasional Super-Massive Black Holes at the Attractors
-            if (Math.random() < 0.0002) {
-                m = 500.0 + Math.random() * 500.0;
-                x = targetA.pos.x + (Math.random()-0.5)*20;
-                y = targetA.pos.y + (Math.random()-0.5)*20;
-                z = targetA.pos.z + (Math.random()-0.5)*20;
-                vx *= 0.1; vy *= 0.1; vz *= 0.1; // Anchors are stable
+                // Select a filament
+                const fil = filaments[Math.floor(Math.random() * filaments.length)];
+                let t = Math.random();
+                
+                // Bias t towards the ends (clusters are denser)
+                if (Math.random() > 0.5) t = t * t; 
+                else t = 1 - (1-t)*(1-t);
+
+                // Base position on filament
+                let px = (1-t) * fil.start.x + t * fil.end.x;
+                let py = (1-t) * fil.start.y + t * fil.end.y;
+                let pz = (1-t) * fil.start.z + t * fil.end.z;
+
+                // Sine Wave Perturbation (Warp the straight lines)
+                // This makes them look like organic veins, not wires
+                const warpFreq = 0.005;
+                const warpAmp = 100.0;
+                px += Math.sin(py * warpFreq) * warpAmp;
+                py += Math.cos(pz * warpFreq) * warpAmp;
+                pz += Math.sin(px * warpFreq) * warpAmp;
+
+                // Thickness/Scatter
+                // Voids mode has thinner filaments
+                let thickness = (mode === 'voids' ? 40 : 100) * UNIVERSE_SCALE;
+                
+                // Density Function: Use noise to clump particles
+                // If noise is low, push particle further out (create gaps in filament)
+                const densityNoise = Math.sin(px*0.01) + Math.cos(py*0.013) + Math.sin(pz*0.007);
+                if (densityNoise < 0) thickness *= 3.0; // Puff out low density areas
+
+                // Gaussian scatter from the filament spine
+                const r = (Math.random() + Math.random() + Math.random()) / 3.0 * thickness;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI;
+
+                x = px + r * Math.sin(phi) * Math.cos(theta);
+                y = py + r * Math.sin(phi) * Math.sin(theta);
+                z = pz + r * Math.cos(phi);
+
+                // Mass depends on density
+                m = (1.0 - (r/thickness)) * 3.0;
+                if (m < 0.5) m = 0.5;
+
+                // Super Cluster Cores
+                if (t < 0.05 || t > 0.95) {
+                    m = 10.0 + Math.random() * 20.0; // Heavy cluster center
+                }
+
+                // Initial Velocity:
+                // 1. Flow along filament towards nearest node
+                const dirToStart = new THREE.Vector3().subVectors(fil.start, new THREE.Vector3(x,y,z)).normalize();
+                const dirToEnd = new THREE.Vector3().subVectors(fil.end, new THREE.Vector3(x,y,z)).normalize();
+                
+                const flowDir = (t < 0.5) ? dirToStart : dirToEnd;
+                const flowSpeed = Math.random() * 5.0;
+
+                vx = flowDir.x * flowSpeed;
+                vy = flowDir.y * flowSpeed;
+                vz = flowDir.z * flowSpeed;
+
+                // 2. Slight rotation around filament axis (Angular momentum)
+                // (Simplified as random perpendicular drift)
+                vx += (Math.random()-0.5) * 4.0;
+                vy += (Math.random()-0.5) * 4.0;
+                vz += (Math.random()-0.5) * 4.0;
             }
 
-        } else if (mode === 'galaxy' || mode === 'collision') {
-            // Keep your existing galaxy logic, it works well for that mode
-            const armCount = 2 + Math.floor(Math.random()*2);
-            const dist = Math.random();
-            const angle = dist * Math.PI * 4 * armCount + (Math.random()*0.5);
-            const r = dist * 400 + 10;
+            const idx = i * 4;
+            dataPos[idx] = x; dataPos[idx+1] = y; dataPos[idx+2] = z; dataPos[idx+3] = m;
+            dataVel[idx] = vx; dataVel[idx+1] = vy; dataVel[idx+2] = vz; dataVel[idx+3] = 0;
+        }
+
+    } else if (mode === 'collision') {
+        // --- GALAXY COLLISION ---
+        for (let i = 0; i < PARTICLES; i++) {
+            let x, y, z, vx, vy, vz, m;
             
+            // Galaxy 1 vs Galaxy 2
+            const isGal1 = i < PARTICLES/2;
+            const centerX = isGal1 ? -400 : 400;
+            const centerZ = isGal1 ? 0 : 0;
+            
+            // Spiral Arms Math
+            const armOffset = Math.random() * Math.PI * 2;
+            const dist = Math.random(); // 0 to 1
+            // Power law distribution for brighter core
+            const r = (dist * dist) * 500 + 10; 
+            
+            const arms = 3;
+            const angle = dist * Math.PI * 4 * arms + armOffset;
+
             x = Math.cos(angle) * r;
             z = Math.sin(angle) * r;
-            y = (Math.random()-0.5) * (dist < 0.2 ? 60 : 20);
-            
-            if (mode === 'collision' && i > PARTICLES/2) {
-                x += 500; z -= 200;
-                let t = x; x = z; z = -t; 
+            y = (Math.random()-0.5) * (r * 0.1); // Flattened disk
+
+            // Rotate Galaxy 2 to make collision messy
+            if (!isGal1) {
+                const tempZ = z;
+                z = y; 
+                y = tempZ; // Flip axis
             }
 
-            m = Math.random() + 1.0;
-            if(i < 200) m = 50.0; 
-            
-            const vMag = Math.sqrt(GRAVITY_CONSTANT * (i<200?1000:4000) / r);
+            x += centerX;
+            z += centerZ;
+
+            // Orbital Velocity (Sqrt for realistic falloff)
+            const vMag = Math.sqrt(15000 / (r + 10));
             vx = -Math.sin(angle) * vMag;
             vz = Math.cos(angle) * vMag;
             vy = 0;
-            
-            x += (Math.random()-0.5)*10;
-            z += (Math.random()-0.5)*10;
-        }
 
-        const idx = i * 4;
-        dataPos[idx] = x; dataPos[idx+1] = y; dataPos[idx+2] = z; dataPos[idx+3] = m;
-        dataVel[idx] = vx; dataVel[idx+1] = vy; dataVel[idx+2] = vz; dataVel[idx+3] = 0;
+            // Add collision velocity
+            if (isGal1) vx += 15; else vx -= 15;
+
+            // Randomize slightly
+            vx += (Math.random()-0.5); 
+            vy += (Math.random()-0.5); 
+            vz += (Math.random()-0.5);
+
+            m = (1.0 - dist) * 5.0 + 0.5; // Core is heavier
+            if (dist < 0.05) m = 50.0; // Supermassive black hole candidates
+
+            const idx = i * 4;
+            dataPos[idx] = x; dataPos[idx+1] = y; dataPos[idx+2] = z; dataPos[idx+3] = m;
+            dataVel[idx] = vx; dataVel[idx+1] = vy; dataVel[idx+2] = vz; dataVel[idx+3] = 0;
+        }
+    } else {
+        // --- GLOBULAR CLUSTER ---
+        for (let i = 0; i < PARTICLES; i++) {
+            // Gaussian Sphere
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const r = Math.pow(Math.random(), 1/3) * 600; // Uniform sphere
+
+            let x = r * Math.sin(phi) * Math.cos(theta);
+            let y = r * Math.sin(phi) * Math.sin(theta);
+            let z = r * Math.cos(phi);
+
+            let m = Math.random() * 2 + 0.5;
+            
+            // Initial Random Velocity (Thermal equilibrium)
+            let vx = (Math.random()-0.5) * 5;
+            let vy = (Math.random()-0.5) * 5;
+            let vz = (Math.random()-0.5) * 5;
+
+            const idx = i * 4;
+            dataPos[idx] = x; dataPos[idx+1] = y; dataPos[idx+2] = z; dataPos[idx+3] = m;
+            dataVel[idx] = vx; dataVel[idx+1] = vy; dataVel[idx+2] = vz; dataVel[idx+3] = 0;
+        }
     }
     
-    // --- TEXTURE UPDATES REMAIN THE SAME ---
     const texPos = new THREE.DataTexture(dataPos, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
     texPos.needsUpdate = true;
     const texVel = new THREE.DataTexture(dataVel, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
@@ -503,6 +609,7 @@ function initData(mode) {
     sceneSim.remove(mesh);
     tmp.dispose(); texPos.dispose(); texVel.dispose();
 }
+
 function initMaterials() {
     matPos = new THREE.ShaderMaterial({
         uniforms: { texPos: {value:null}, texVel: {value:null}, delta: {value:0.0} },
@@ -512,6 +619,7 @@ function initMaterials() {
         uniforms: { 
             texPos: {value:null}, texVel: {value:null}, texGrid: {value:null}, delta: {value:0.0},
             gravityConstant: {value: GRAVITY_CONSTANT * UNIVERSE_SCALE},
+            softening: {value: SOFTENING},
             gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:100.0 * UNIVERSE_SCALE}
         },
         vertexShader: vsPass, fragmentShader: fsVelocity
@@ -529,7 +637,6 @@ function initMaterials() {
 function initParticles() {
     initData(simMode);
     
-    // Grid & Display Geometry
     const geo = new THREE.BufferGeometry();
     const uvs = new Float32Array(PARTICLES * 3);
     for (let i = 0; i < PARTICLES; i++) {
@@ -539,67 +646,178 @@ function initParticles() {
     }
     geo.setAttribute('position', new THREE.BufferAttribute(uvs, 3));
     
-    sceneSim.add(new THREE.Mesh(geometryQuad, matPos)); // Physics Quad
-    sceneGrid.add(new THREE.Points(geo, matGrid)); // Grid Points
-    scene.add(new THREE.Points(geo, matDisplay)); // Visual Points
+    sceneSim.add(new THREE.Mesh(geometryQuad, matPos)); 
+    sceneGrid.add(new THREE.Points(geo, matGrid)); 
+    scene.add(new THREE.Points(geo, matDisplay)); 
 }
 
-function formatNumber(num) {
-    return num.toLocaleString('en-US');
-}
+function formatNumber(num) { return num.toLocaleString('en-US'); }
 
 function updateParticleCount(desiredCount) {
-    // Calculate texture width from desired particle count (square root, rounded)
     TEXTURE_WIDTH = Math.round(Math.sqrt(desiredCount));
     PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
-    
-    // Update UI display
     document.getElementById('particleCount').textContent = formatNumber(PARTICLES);
     document.getElementById('particleCountDisplay').textContent = formatNumber(PARTICLES);
-    
-    // Reinitialize simulation with new particle count
     reinitializeSimulation();
 }
 
 function reinitializeSimulation() {
-    // Dispose old resources
-    if (fboPos1) fboPos1.dispose();
-    if (fboPos2) fboPos2.dispose();
-    if (fboVel1) fboVel1.dispose();
-    if (fboVel2) fboVel2.dispose();
+    if (fboPos1) fboPos1.dispose(); if (fboPos2) fboPos2.dispose();
+    if (fboVel1) fboVel1.dispose(); if (fboVel2) fboVel2.dispose();
     if (fboGrid) fboGrid.dispose();
     
-    // Clear scenes
     while(sceneSim.children.length > 0) sceneSim.remove(sceneSim.children[0]);
     while(sceneGrid.children.length > 0) sceneGrid.remove(sceneGrid.children[0]);
     while(scene.children.length > 0) {
         const obj = scene.children[0];
         if (obj instanceof THREE.Points) {
-            scene.remove(obj);
-            obj.geometry.dispose();
-            obj.material.dispose();
-        } else {
-            scene.remove(obj);
-        }
+            scene.remove(obj); obj.geometry.dispose(); obj.material.dispose();
+        } else scene.remove(obj);
     }
     
-    // Reinitialize
     initFBOs();
     initParticles();
 }
 
 function setupUI() {
-    // Initialize particle count display
     document.getElementById('particleCount').textContent = formatNumber(PARTICLES);
     document.getElementById('particleCountDisplay').textContent = formatNumber(PARTICLES);
-    
     document.getElementById('speed').addEventListener('input', e => simSpeed = parseFloat(e.target.value));
     document.getElementById('configSelect').addEventListener('change', e => { simMode = e.target.value; initData(simMode); });
     document.getElementById('resetBtn').addEventListener('click', () => { initData(simMode); });
-    document.getElementById('particleCountSlider').addEventListener('input', e => {
-        const desiredCount = parseInt(e.target.value);
-        updateParticleCount(desiredCount);
+    document.getElementById('particleCountSlider').addEventListener('change', e => { updateParticleCount(parseInt(e.target.value)); });
+    
+    // Video recording controls
+    const recordBtn = document.getElementById('recordBtn');
+    const durationInput = document.getElementById('recordingDuration');
+    const statusDiv = document.getElementById('recordingStatus');
+    
+    recordBtn.addEventListener('click', toggleRecording);
+    durationInput.addEventListener('input', e => {
+        if (!isRecording) {
+            recordingDuration = parseFloat(e.target.value) * 60; // Convert to seconds
+        }
     });
+    
+    // Initialize duration
+    recordingDuration = parseFloat(durationInput.value) * 60;
+}
+
+async function toggleRecording() {
+    if (isRecording) {
+        stopRecording();
+    } else {
+        await startRecording();
+    }
+}
+
+async function startRecording() {
+    try {
+        const canvas = renderer.domElement;
+        const stream = canvas.captureStream(30); // 30 FPS
+        
+        const options = {
+            mimeType: 'video/webm;codecs=vp9',
+            videoBitsPerSecond: 30000000 // 30 Mbps
+        };
+        
+        // Fallback to vp8 if vp9 is not supported
+        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+            options.mimeType = 'video/webm;codecs=vp8';
+        }
+        
+        // Final fallback
+        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+            options.mimeType = 'video/webm';
+        }
+        
+        mediaRecorder = new MediaRecorder(stream, options);
+        recordedChunks = [];
+        
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                recordedChunks.push(event.data);
+            }
+        };
+        
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `astro3d-recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            isRecording = false;
+            updateRecordingUI();
+        };
+        
+        mediaRecorder.start();
+        isRecording = true;
+        recordingStartTime = performance.now();
+        
+        const durationInput = document.getElementById('recordingDuration');
+        recordingDuration = parseFloat(durationInput.value) * 60; // Convert minutes to seconds
+        
+        // Auto-stop after duration
+        recordingTimer = setTimeout(() => {
+            stopRecording();
+        }, recordingDuration * 1000);
+        
+        updateRecordingUI();
+    } catch (error) {
+        console.error('Error starting recording:', error);
+        alert('Failed to start recording: ' + error.message);
+        isRecording = false;
+        updateRecordingUI();
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+    if (recordingTimer) {
+        clearTimeout(recordingTimer);
+        recordingTimer = null;
+    }
+    updateRecordingUI();
+}
+
+function updateRecordingUI() {
+    const recordBtn = document.getElementById('recordBtn');
+    const durationInput = document.getElementById('recordingDuration');
+    const statusDiv = document.getElementById('recordingStatus');
+    
+    if (isRecording) {
+        recordBtn.textContent = 'Stop Recording';
+        recordBtn.classList.add('recording');
+        durationInput.disabled = true;
+        statusDiv.style.display = 'block';
+        
+        // Update status with remaining time
+        const updateStatus = () => {
+            if (!isRecording) return;
+            const elapsed = (performance.now() - recordingStartTime) / 1000;
+            const remaining = Math.max(0, recordingDuration - elapsed);
+            const minutes = Math.floor(remaining / 60);
+            const seconds = Math.floor(remaining % 60);
+            statusDiv.textContent = `Recording... ${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
+            if (isRecording) {
+                setTimeout(updateStatus, 1000);
+            }
+        };
+        updateStatus();
+    } else {
+        recordBtn.textContent = 'Start Recording';
+        recordBtn.classList.remove('recording');
+        durationInput.disabled = false;
+        statusDiv.style.display = 'none';
+        statusDiv.textContent = '';
+    }
 }
 
 function onResize() {
@@ -616,17 +834,16 @@ function animate() {
     
     frames++;
     if (now - stats.ms > 500) {
-        document.getElementById('fps').textContent = Math.round(frames * 1000 / (now - stats.ms));
+        document.getElementById('fps').textContent = Math.round(frames * 1000 / (now - stats.ms)) + " FPS";
         stats.ms = now; frames = 0;
     }
 
     if (simSpeed > 0) {
-        // 1. Grid Scatter
+        // Physics Pipeline
         renderer.setRenderTarget(fboGrid); renderer.clearColor();
         matGrid.uniforms.texPos.value = fboPos1.texture;
         renderer.render(sceneGrid, cameraSim);
 
-        // 2. Velocity Gather
         sceneSim.children[0].material = matVel;
         matVel.uniforms.texPos.value = fboPos1.texture;
         matVel.uniforms.texVel.value = fboVel1.texture;
@@ -635,7 +852,6 @@ function animate() {
         renderer.setRenderTarget(fboVel2); renderer.render(sceneSim, cameraSim);
         let t = fboVel1; fboVel1 = fboVel2; fboVel2 = t;
 
-        // 3. Position Integrate
         sceneSim.children[0].material = matPos;
         matPos.uniforms.texPos.value = fboPos1.texture;
         matPos.uniforms.texVel.value = fboVel1.texture;
@@ -648,23 +864,22 @@ function animate() {
     matDisplay.uniforms.texPos.value = fboPos1.texture;
     matDisplay.uniforms.texVel.value = fboVel1.texture;
     
-    // Continuous WASD movement
-    const moveSpeed = 200 * dt; // Speed per second
-    const fwd = new THREE.Vector3();
+    // Smooth Camera Movement
+    const moveSpeed = 400 * dt * UNIVERSE_SCALE;
+    const fwd = new THREE.Vector3(); 
     camera.getWorldDirection(fwd);
     const rgt = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+    const up = new THREE.Vector3().crossVectors(rgt, fwd).normalize();
     
     if (keys['w']) camera.position.addScaledVector(fwd, moveSpeed);
     if (keys['s']) camera.position.addScaledVector(fwd, -moveSpeed);
     if (keys['a']) camera.position.addScaledVector(rgt, -moveSpeed);
     if (keys['d']) camera.position.addScaledVector(rgt, moveSpeed);
     
-    // Update controls target to maintain camera direction
-    if (keys['w'] || keys['s'] || keys['a'] || keys['d']) {
-        controls.target.copy(camera.position).add(fwd);
-    }
-    
+    // Update controls target to follow camera movement
+    controls.target.copy(camera.position).addScaledVector(fwd, 100 * UNIVERSE_SCALE);
     controls.update();
+    
     renderer.render(scene, camera);
 }
 </script>
