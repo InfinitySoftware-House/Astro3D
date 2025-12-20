@@ -263,6 +263,7 @@ const vsVisual = `
         gl_Position = projectionMatrix * mvPosition;
         
         float dist = -mvPosition.z;
+        dist = max(dist, 0.1); // Prevent division by zero and ensure minimum distance
         float speed = length(vel);
         
         // Simulation Color Palette (Heatmap)
@@ -286,11 +287,11 @@ const vsVisual = `
         // Highlight super-heavy particles (Black Holes/Cluster Cores)
         if (mass > 50.0) {
             vColor = vec3(1.0, 1.0, 1.0);
-            gl_PointSize = (1200.0 / dist);
+            gl_PointSize = clamp(9000.0 / dist, 2.0, 4096.0); // Brighter, more visible cores
             vAlpha = 1.0;
         } else {
-            gl_PointSize = (300.0 / dist) * max(0.5, mass * 0.5);
-            vAlpha = min(0.8, mass * 0.3 + 0.3);
+            gl_PointSize = clamp((4500.0 / dist) * max(0.8, mass * 0.7), 1.5, 4096.0);
+            vAlpha = min(1.0, mass * 0.4 + 0.5);
         }
         
         vSize = gl_PointSize;
@@ -306,7 +307,8 @@ const fsVisual = `
         if (distSq > 0.25) discard;
         
         float strength = 1.0 - (distSq * 4.0);
-        strength = pow(strength, 2.0); // Sharper points
+        strength = pow(strength, 1.4);
+        strength = min(1.0, strength * 1.35);
         
         gl_FragColor = vec4(vColor, vAlpha * strength);
     }
@@ -352,7 +354,7 @@ function init() {
     // Dark background for deep space
     scene.fog = new THREE.FogExp2(0x050505, 0.0002);
     
-    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000 * UNIVERSE_SCALE);
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.001, 100000 * UNIVERSE_SCALE);
     camera.position.set(0, 0, 1200 * UNIVERSE_SCALE); // Start further back
     
     controls = new OrbitControls(camera, canvas);
@@ -400,13 +402,13 @@ function initData(mode) {
     const dataVel = new Float32Array(PARTICLES * 4);
     
     // Config vars
-    const spread = 800 * UNIVERSE_SCALE;
+    const spread = 2000 * UNIVERSE_SCALE;
     
     if (mode === 'web' || mode === 'voids') {
         // --- ALGORITHM: PROCEDURAL FILAMENTS & VOIDS ---
         
         // 1. Generate Structural Nodes (Galaxy Clusters)
-        const nodeCount = 24;
+        const nodeCount = 40;
         const nodes = [];
         for(let i=0; i<nodeCount; i++) {
             nodes.push(new THREE.Vector3(
@@ -648,7 +650,9 @@ function initParticles() {
     
     sceneSim.add(new THREE.Mesh(geometryQuad, matPos)); 
     sceneGrid.add(new THREE.Points(geo, matGrid)); 
-    scene.add(new THREE.Points(geo, matDisplay)); 
+    const displayPoints = new THREE.Points(geo, matDisplay);
+    displayPoints.frustumCulled = false;
+    scene.add(displayPoints); 
 }
 
 function formatNumber(num) { return num.toLocaleString('en-US'); }
