@@ -120,6 +120,8 @@ const GRID_TEX_WIDTH = 64;
 const GRAVITY_CONSTANT = 6.0;
 const SOFTENING = 2.5;
 const UNIVERSE_SCALE = 5.0; // Larger universe for more "Sim" feel
+const GRID_HALF_EXTENT = 1200 * UNIVERSE_SCALE;
+const GRID_CELL_SIZE = (GRID_HALF_EXTENT * 2.0) / GRID_DIM;
 
 // --- Shaders ---
 
@@ -161,7 +163,8 @@ const vsAggregator = `
         vec4 pData = texture2D(texPos, position.xy);
         vParticleData = pData;
         
-        vec3 gridCoord = floor(pData.xyz / gridCellSize);
+        float halfGrid = gridDim * 0.5;
+        vec3 gridCoord = floor((pData.xyz / gridCellSize) + halfGrid);
         gridCoord = clamp(gridCoord, 0.0, gridDim - 1.0);
         
         float index = gridCoord.x + gridCoord.y * gridDim + gridCoord.z * gridDim * gridDim;
@@ -192,6 +195,7 @@ const fsVelocity = `
     uniform float gravityConstant;
     uniform float softening;
     uniform float gridDim; 
+    uniform float gridTexWidth; 
     uniform float gridCellSize;
     
     varying vec2 vUv;
@@ -199,27 +203,43 @@ const fsVelocity = `
     void main() {
         vec4 pData = texture2D(texPos, vUv);
         vec3 myPos = pData.xyz;
+        float myMass = pData.w;
         vec3 myVel = texture2D(texVel, vUv).xyz;
         
         vec3 acc = vec3(0.0);
         float cellSize = gridCellSize;
+        float halfGrid = gridDim * 0.5;
+        vec3 myGridCoord = floor((myPos / cellSize) + halfGrid);
+        myGridCoord = clamp(myGridCoord, 0.0, gridDim - 1.0);
+        float myCellIndex = myGridCoord.x + myGridCoord.y * gridDim + myGridCoord.z * gridDim * gridDim;
         
         // Loop over grid texture (64x64)
         for(float y = 0.5; y < 64.0; y += 1.0) {
             for(float x = 0.5; x < 64.0; x += 1.0) {
-                vec2 gridUV = vec2(x, y) / 64.0;
+                vec2 gridUV = vec2(x, y) / gridTexWidth;
                 vec4 cellData = texture2D(texGrid, gridUV);
+                float cellIndex = floor(x - 0.5) + floor(y - 0.5) * gridTexWidth;
                 
                 float cellMass = cellData.w;
                 
                 if(cellMass > 0.001) {
-                    vec3 cellCoM = cellData.xyz / cellMass;
-                    vec3 dir = cellCoM - myPos;
-                    float distSq = dot(dir, dir);
-                    float softSq = softening * softening + (cellSize * cellSize * 0.1); 
-                    float dist = sqrt(distSq + softSq);
-                    float f = (gravityConstant * cellMass) / (dist * dist * dist); 
-                    acc += dir * f;
+                    vec3 cellSum = cellData.xyz;
+                    if (cellIndex == myCellIndex) {
+                        cellMass = max(0.0, cellMass - myMass);
+                        cellSum -= myPos * myMass;
+                    }
+                    if (cellMass > 0.001) {
+                        vec3 cellCoM = cellSum / cellMass;
+                        vec3 dir = cellCoM - myPos;
+                        float distSq = dot(dir, dir);
+                        float softSq = softening * softening;
+                        if (cellIndex == myCellIndex) {
+                            softSq = max(softSq, (cellSize * cellSize) * 0.25);
+                        }
+                        float invDist = inversesqrt(distSq + softSq);
+                        float invDist3 = invDist * invDist * invDist;
+                        acc += dir * (gravityConstant * cellMass * invDist3);
+                    }
                 }
             }
         }
@@ -622,12 +642,12 @@ function initMaterials() {
             texPos: {value:null}, texVel: {value:null}, texGrid: {value:null}, delta: {value:0.0},
             gravityConstant: {value: GRAVITY_CONSTANT * UNIVERSE_SCALE},
             softening: {value: SOFTENING},
-            gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:100.0 * UNIVERSE_SCALE}
+            gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:GRID_CELL_SIZE}
         },
         vertexShader: vsPass, fragmentShader: fsVelocity
     });
     matGrid = new THREE.ShaderMaterial({
-        uniforms: { texPos: {value:null}, gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:100.0 * UNIVERSE_SCALE} },
+        uniforms: { texPos: {value:null}, gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:GRID_CELL_SIZE} },
         vertexShader: vsAggregator, fragmentShader: fsAggregator, blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false
     });
     matDisplay = new THREE.ShaderMaterial({
