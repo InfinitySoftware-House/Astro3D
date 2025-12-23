@@ -37,6 +37,36 @@
         select { width: 100%; background: #111; color: #fff; border: 1px solid #333; padding: 8px; border-radius: 4px; font-size: 12px; font-family: 'Courier New', monospace; outline: none; }
         select:focus { border-color: #00e5ff; }
 
+        #toggleUiBtn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 14px;
+            border-radius: 4px;
+            border: 1px solid rgba(0, 229, 255, 0.4);
+            background: rgba(5, 5, 5, 0.8);
+            color: #00e5ff;
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            z-index: 10;
+            transition: background 0.2s ease;
+            width: auto;
+            min-width: 120px;
+            text-align: center;
+            display: inline-flex;
+            justify-content: center;
+            gap: 4px;
+        }
+        #toggleUiBtn:hover {
+            background: rgba(0, 229, 255, 0.2);
+        }
+        #toggleUiBtn:focus-visible {
+            outline: 2px solid #00e5ff;
+            outline-offset: 2px;
+        }
+
         button {
             width: 100%; margin-top: 15px; padding: 10px; background: rgba(0, 229, 255, 0.1); border: 1px solid #00e5ff; 
             color: #00e5ff; font-size: 11px; text-transform: uppercase; font-weight: bold; cursor: pointer; letter-spacing: 1px;
@@ -81,12 +111,13 @@
         <div style="font-size: 10px; color: #666; text-align: right;" id="particleCountDisplay">131,072</div>
         
         <label>Time Step (Speed)</label>
-        <input type="range" id="speed" min="0" max="2" step="0.05" value="0.2">
+        <input type="range" id="speed" min="0" max="4" step="0.05" value="0.2">
         
         <label>Initial Conditions</label>
         <select id="configSelect">
             <option value="web">CDM Cosmic Web (Filaments)</option>
             <option value="voids">Deep Field Voids (Bubbles)</option>
+            <option value="random">Chaotic Scatter (Random)</option>
             <option value="collision">Galactic Merger</option>
             <option value="cluster">Globular Cluster</option>
         </select>
@@ -104,7 +135,9 @@
             [WASD] Navigate | [L-Click] Rotate
         </div>
     </div>
-</div>
+ </div>
+
+<button id="toggleUiBtn" aria-pressed="false">Hide UI</button>
 
 <div id="warning">Floating Point Textures not supported on this device.</div>
 
@@ -122,6 +155,141 @@ const SOFTENING = 2.5;
 const UNIVERSE_SCALE = 5.0; // Larger universe for more "Sim" feel
 const GRID_HALF_EXTENT = 1200 * UNIVERSE_SCALE;
 const GRID_CELL_SIZE = (GRID_HALF_EXTENT * 2.0) / GRID_DIM;
+const COARSE_GRID_DIM = 4;
+const COARSE_GRID_TEX_WIDTH = 8;
+const COARSE_GRID_CELL_SIZE = (GRID_HALF_EXTENT * 2.0) / COARSE_GRID_DIM;
+const MAX_PHYS_STEP = 0.045; // limit per-step timestep to keep accuracy when speeding up
+const CAMERA_SHIFT_MULT = 3.0;
+
+const STARFIELD_COUNT = 3200;
+const STARFIELD_RADIUS = 28000 * UNIVERSE_SCALE;
+const STARFIELD_ROT_SPEED = 0.000015;
+const DUST_COUNT = 2600;
+const DUST_RADIUS = 17000 * UNIVERSE_SCALE;
+const DUST_FLATTENING = 0.32;
+const DUST_ROT_SPEED = 0.00004;
+
+function randomDirection() {
+    const theta = Math.random() * Math.PI * 2.0;
+    const phi = Math.acos(2.0 * Math.random() - 1.0);
+    const sinPhi = Math.sin(phi);
+    return new THREE.Vector3(
+        sinPhi * Math.cos(theta),
+        sinPhi * Math.sin(theta),
+        Math.cos(phi)
+    );
+}
+
+function randomShapePosition(radiusScale) {
+    const baseDir = randomDirection();
+    const axisScale = new THREE.Vector3(
+        0.7 + Math.random() * 0.8,
+        0.7 + Math.random() * 0.8,
+        0.7 + Math.random() * 0.8
+    );
+    const scaledDir = new THREE.Vector3(
+        baseDir.x * axisScale.x,
+        baseDir.y * axisScale.y,
+        baseDir.z * axisScale.z
+    ).normalize();
+    const noise = (Math.sin(baseDir.x * 6.3) + Math.cos(baseDir.y * 4.2) + Math.sin(baseDir.z * 5.1)) * 0.15;
+    const radius = Math.pow(Math.random(), 1.0 / 3.0) * radiusScale;
+    const finalRadius = Math.max(radiusScale * 0.05, radius * (1.0 + noise));
+    return scaledDir.multiplyScalar(finalRadius);
+}
+
+function randomPointInSphere(radius) {
+    const cosPhi = Math.random() * 2.0 - 1.0;
+    const sinPhi = Math.sqrt(Math.max(0.0, 1.0 - cosPhi * cosPhi));
+    const theta = Math.random() * Math.PI * 2.0;
+    const r = Math.pow(Math.random(), 1.0 / 3.0) * radius;
+    return new THREE.Vector3(
+        r * sinPhi * Math.cos(theta),
+        r * sinPhi * Math.sin(theta),
+        r * cosPhi
+    );
+}
+
+function createGlowTexture(size = 96) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.4, 'rgba(255,255,255,0.35)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+function createStarfield(count, radius, texture) {
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const colorHelper = new THREE.Color();
+    for (let i = 0; i < count; i++) {
+        const phi = Math.acos(2.0 * Math.random() - 1.0);
+        const theta = Math.random() * Math.PI * 2.0;
+        const r = radius * Math.pow(Math.random(), 1 / 3);
+        positions[i * 3] = Math.sin(phi) * Math.cos(theta) * r;
+        positions[i * 3 + 1] = Math.sin(phi) * Math.sin(theta) * r;
+        positions[i * 3 + 2] = Math.cos(phi) * r;
+
+        colorHelper.setHSL(0.55 + (Math.random() - 0.5) * 0.2, 0.7, 0.4 + Math.random() * 0.35);
+        colors[i * 3] = colorHelper.r;
+        colors[i * 3 + 1] = colorHelper.g;
+        colors[i * 3 + 2] = colorHelper.b;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.PointsMaterial({
+        size: 3.2,
+        map: texture,
+        vertexColors: true,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true
+    });
+    material.opacity = 0.8;
+
+    return new THREE.Points(geometry, material);
+}
+
+function createDustField(count, radius, texture) {
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2.0;
+        const radial = Math.pow(Math.random(), 0.6) * radius;
+        const height = (Math.random() - 0.5) * radius * 0.05;
+        positions[i * 3] = Math.cos(angle) * radial;
+        positions[i * 3 + 1] = height * DUST_FLATTENING;
+        positions[i * 3 + 2] = Math.sin(angle) * radial;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.PointsMaterial({
+        size: 180,
+        map: texture,
+        transparent: true,
+        opacity: 0.08,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        sizeAttenuation: true,
+        color: new THREE.Color(0.45, 0.65, 1.0)
+    });
+
+    return new THREE.Points(geometry, material);
+}
 
 // --- Shaders ---
 
@@ -165,7 +333,7 @@ const vsAggregator = `
         
         float halfGrid = gridDim * 0.5;
         vec3 gridCoord = floor((pData.xyz / gridCellSize) + halfGrid);
-        gridCoord = clamp(gridCoord, 0.0, gridDim - 1.0);
+        gridCoord = clamp(gridCoord, vec3(0.0), vec3(gridDim - 1.0));
         
         float index = gridCoord.x + gridCoord.y * gridDim + gridCoord.z * gridDim * gridDim;
         
@@ -189,8 +357,9 @@ const fsAggregator = `
 const fsVelocity = `
     uniform sampler2D texPos;
     uniform sampler2D texVel;
-    uniform sampler2D texGrid; 
-    
+    uniform sampler2D texGrid;
+    uniform sampler2D texGridCoarse;
+
     uniform float delta;
     uniform float gravityConstant;
     uniform float softening;
@@ -198,7 +367,15 @@ const fsVelocity = `
     uniform float gridTexWidth; 
     uniform float gridCellSize;
     
+    uniform float coarseGridDim;
+    uniform float coarseGridTexWidth;
+    uniform float coarseGridCellSize;
+
     varying vec2 vUv;
+
+    const int LOCAL_RADIUS = 1;
+    const int COARSE_GRID_DIM_CONST = ${COARSE_GRID_DIM};
+    const float COARSE_SKIP_RADIUS = 1.0;
 
     void main() {
         vec4 pData = texture2D(texPos, vUv);
@@ -210,35 +387,70 @@ const fsVelocity = `
         float cellSize = gridCellSize;
         float halfGrid = gridDim * 0.5;
         vec3 myGridCoord = floor((myPos / cellSize) + halfGrid);
-        myGridCoord = clamp(myGridCoord, 0.0, gridDim - 1.0);
+        myGridCoord = clamp(myGridCoord, vec3(0.0), vec3(gridDim - 1.0));
         float myCellIndex = myGridCoord.x + myGridCoord.y * gridDim + myGridCoord.z * gridDim * gridDim;
-        
-        // Loop over grid texture (64x64)
-        for(float y = 0.5; y < 64.0; y += 1.0) {
-            for(float x = 0.5; x < 64.0; x += 1.0) {
-                vec2 gridUV = vec2(x, y) / gridTexWidth;
-                vec4 cellData = texture2D(texGrid, gridUV);
-                float cellIndex = floor(x - 0.5) + floor(y - 0.5) * gridTexWidth;
-                
-                float cellMass = cellData.w;
-                
-                if(cellMass > 0.001) {
-                    vec3 cellSum = cellData.xyz;
-                    if (cellIndex == myCellIndex) {
-                        cellMass = max(0.0, cellMass - myMass);
-                        cellSum -= myPos * myMass;
-                    }
+
+        for (int dz = -LOCAL_RADIUS; dz <= LOCAL_RADIUS; dz++) {
+            for (int dy = -LOCAL_RADIUS; dy <= LOCAL_RADIUS; dy++) {
+                for (int dx = -LOCAL_RADIUS; dx <= LOCAL_RADIUS; dx++) {
+                    vec3 sampleCoord = myGridCoord + vec3(float(dx), float(dy), float(dz));
+                    sampleCoord = clamp(sampleCoord, vec3(0.0), vec3(gridDim - 1.0));
+                    float cellIndex = sampleCoord.x + sampleCoord.y * gridDim + sampleCoord.z * gridDim * gridDim;
+                    float col = mod(cellIndex, gridTexWidth);
+                    float row = floor(cellIndex / gridTexWidth);
+                    vec2 gridUV = (vec2(col, row) + 0.5) / gridTexWidth;
+                    vec4 cellData = texture2D(texGrid, gridUV);
+                    float cellMass = cellData.w;
+
                     if (cellMass > 0.001) {
-                        vec3 cellCoM = cellSum / cellMass;
-                        vec3 dir = cellCoM - myPos;
-                        float distSq = dot(dir, dir);
-                        float softSq = softening * softening;
+                        vec3 cellSum = cellData.xyz;
                         if (cellIndex == myCellIndex) {
-                            softSq = max(softSq, (cellSize * cellSize) * 0.25);
+                            cellMass = max(0.0, cellMass - myMass);
+                            cellSum -= myPos * myMass;
                         }
+                        if (cellMass > 0.001) {
+                            vec3 cellCoM = cellSum / cellMass;
+                            vec3 dir = cellCoM - myPos;
+                            float distSq = dot(dir, dir);
+                            float softSq = softening * softening;
+                            if (cellIndex == myCellIndex) {
+                                softSq = max(softSq, (cellSize * cellSize) * 0.25);
+                            }
+                            float invDist = inversesqrt(distSq + softSq);
+                            float invDist3 = invDist * invDist * invDist;
+                            acc += dir * (gravityConstant * cellMass * invDist3);
+                        }
+                    }
+                }
+            }
+        }
+
+        float coarseHalfGrid = coarseGridDim * 0.5;
+        vec3 myCoarseCoord = floor((myPos / coarseGridCellSize) + coarseHalfGrid);
+        myCoarseCoord = clamp(myCoarseCoord, vec3(0.0), vec3(coarseGridDim - 1.0));
+
+        for (int cz = 0; cz < COARSE_GRID_DIM_CONST; cz++) {
+            for (int cy = 0; cy < COARSE_GRID_DIM_CONST; cy++) {
+                for (int cx = 0; cx < COARSE_GRID_DIM_CONST; cx++) {
+                    vec3 coarseCoord = vec3(float(cx), float(cy), float(cz));
+                    vec3 diff = abs(coarseCoord - myCoarseCoord);
+                    if (diff.x <= COARSE_SKIP_RADIUS && diff.y <= COARSE_SKIP_RADIUS && diff.z <= COARSE_SKIP_RADIUS) {
+                        continue;
+                    }
+                    float coarseIndex = coarseCoord.x + coarseCoord.y * coarseGridDim + coarseCoord.z * coarseGridDim * coarseGridDim;
+                    float col = mod(coarseIndex, coarseGridTexWidth);
+                    float row = floor(coarseIndex / coarseGridTexWidth);
+                    vec2 coarseUV = (vec2(col, row) + 0.5) / coarseGridTexWidth;
+                    vec4 coarseData = texture2D(texGridCoarse, coarseUV);
+                    float coarseMass = coarseData.w;
+                    if (coarseMass > 0.001) {
+                        vec3 coarseCoM = coarseData.xyz / coarseMass;
+                        vec3 dir = coarseCoM - myPos;
+                        float distSq = dot(dir, dir);
+                        float softSq = softening * softening * 4.0;
                         float invDist = inversesqrt(distSq + softSq);
                         float invDist3 = invDist * invDist * invDist;
-                        acc += dir * (gravityConstant * cellMass * invDist3);
+                        acc += dir * (gravityConstant * coarseMass * invDist3 * 0.35);
                     }
                 }
             }
@@ -249,7 +461,7 @@ const fsVelocity = `
         vec3 expansionDir = normalize(myPos);
         
         // This force counteracts gravity at large scales, stabilizing the web
-        float expansionForce = 0.0005 * distFromCenter; 
+        float expansionForce = 0.00005 * distFromCenter; 
         
         // Drag (Simulate Interstellar Medium friction slightly)
         myVel *= 0.999; 
@@ -267,54 +479,38 @@ const fsVelocity = `
 // VISUAL SHADER: Adds "Temperature" coloring based on local density/energy
 const vsVisual = `
     uniform sampler2D texPos;
-    uniform sampler2D texVel;
     varying vec3 vColor;
     varying float vAlpha;
-    varying float vSize;
 
     void main() {
         vec4 posData = texture2D(texPos, position.xy);
-        vec3 vel = texture2D(texVel, position.xy).xyz;
-        
         vec3 pos = posData.xyz;
         float mass = posData.w;
-        
+
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        
-        float dist = -mvPosition.z;
-        dist = max(dist, 0.1); // Prevent division by zero and ensure minimum distance
-        float speed = length(vel);
-        
-        // Simulation Color Palette (Heatmap)
-        // Cold/Slow/Void = Deep Purple/Blue
-        // Medium/Filament = Cyan/Green
-        // Hot/Cluster = Yellow/White
-        
-        vec3 cVoid = vec3(0.05, 0.0, 0.2);
-        vec3 cFilament = vec3(0.0, 0.8, 1.0);
-        vec3 cCluster = vec3(1.0, 0.9, 0.7);
-        
-        // Calculate "Energy" for coloring
-        float energy = speed * 0.15 + (mass * 0.05);
-        
-        if (energy < 0.5) {
-            vColor = mix(cVoid, cFilament, energy * 2.0);
-        } else {
-            vColor = mix(cFilament, cCluster, min(1.0, (energy - 0.5) * 2.0));
-        }
 
-        // Highlight super-heavy particles (Black Holes/Cluster Cores)
-        if (mass > 50.0) {
-            vColor = vec3(1.0, 1.0, 1.0);
-            gl_PointSize = clamp(9000.0 / dist, 2.0, 4096.0); // Brighter, more visible cores
-            vAlpha = 1.0;
-        } else {
-            gl_PointSize = clamp((4500.0 / dist) * max(0.8, mass * 0.7), 1.5, 4096.0);
-            vAlpha = min(1.0, mass * 0.4 + 0.5);
-        }
-        
-        vSize = gl_PointSize;
+        float depth = -mvPosition.z;
+        depth = max(depth, 0.1);
+
+        float massNorm = clamp((mass - 0.5) / 49.5, 0.0, 1.0);
+        vec3 coolStar = vec3(1.0, 0.5, 0.2);
+        vec3 warmStar = vec3(1.0, 0.9, 0.7);
+        vec3 hotStar = vec3(0.6, 0.85, 1.0);
+
+        vec3 starColor = (massNorm < 0.5)
+            ? mix(coolStar, warmStar, massNorm * 2.0)
+            : mix(warmStar, hotStar, (massNorm - 0.5) * 2.0);
+
+        float intensity = pow(0.5 + massNorm * 0.5, 1.8);
+        vColor = starColor * (0.7 + intensity * 0.5);
+
+        float glow = clamp((mass * 0.05) / (depth * 0.002 + 0.05), 0.2, 1.0);
+        vAlpha = clamp(0.6 + glow, 0.0, 1.0);
+
+        float sizeBase = clamp(3600.0 / depth, 1.4, 4096.0);
+        float sizeMass = 1.0 + mass * 0.04;
+        gl_PointSize = sizeBase * sizeMass;
     }
 `;
 
@@ -336,10 +532,12 @@ const fsVisual = `
 
 let renderer, scene, camera, controls;
 let simMode = 'web'; 
+let starField, dustField, glowTexture;
 
-let fboPos1, fboPos2, fboVel1, fboVel2, fboGrid;
+let fboPos1, fboPos2, fboVel1, fboVel2, fboGrid, fboGridCoarse;
 let sceneSim, cameraSim, sceneGrid, geometryQuad;
-let matPos, matVel, matGrid, matDisplay;
+let matPos, matVel, matGrid, matGridCoarse, matDisplay;
+let gridPoints;
 
 let stats = { fps: 0, ms: 0 };
 let lastTime = 0;
@@ -354,6 +552,9 @@ let recordingStartTime = 0;
 let recordingDuration = 0;
 let recordingTimer = null;
 let isRecording = false; 
+const uiLayerElement = document.getElementById('ui-layer');
+const toggleUiBtn = document.getElementById('toggleUiBtn');
+let uiVisible = true;
 
 init();
 animate();
@@ -364,6 +565,11 @@ function init() {
     
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false, powerPreference: "high-performance" });
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x01030b, 1.0);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.25;
+    renderer.physicallyCorrectLights = true;
     
     if (!renderer.capabilities.isWebGL2 && !renderer.extensions.get('OES_texture_float')) {
         document.getElementById('warning').style.display = 'block';
@@ -371,8 +577,16 @@ function init() {
     }
 
     scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x01030b);
     // Dark background for deep space
     scene.fog = new THREE.FogExp2(0x050505, 0.0002);
+    glowTexture = glowTexture || createGlowTexture(128);
+    starField = createStarfield(STARFIELD_COUNT, STARFIELD_RADIUS, glowTexture);
+    starField.userData.persistent = true;
+    scene.add(starField);
+    dustField = createDustField(DUST_COUNT, DUST_RADIUS, glowTexture);
+    dustField.userData.persistent = true;
+    scene.add(dustField);
     
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.001, 100000 * UNIVERSE_SCALE);
     camera.position.set(0, 0, 1200 * UNIVERSE_SCALE); // Start further back
@@ -408,12 +622,17 @@ function createTexture() {
     });
 }
 
+function createGridTarget(width) {
+    return new THREE.WebGLRenderTarget(width, width, {
+        type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter
+    });
+}
+
 function initFBOs() {
     fboPos1 = createTexture(); fboPos2 = createTexture();
     fboVel1 = createTexture(); fboVel2 = createTexture();
-    fboGrid = new THREE.WebGLRenderTarget(GRID_TEX_WIDTH, GRID_TEX_WIDTH, {
-        type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter
-    });
+    fboGrid = createGridTarget(GRID_TEX_WIDTH);
+    fboGridCoarse = createGridTarget(COARSE_GRID_TEX_WIDTH);
 }
 
 // --- CORE GENERATION ALGORITHM ---
@@ -424,18 +643,41 @@ function initData(mode) {
     // Config vars
     const spread = 2000 * UNIVERSE_SCALE;
     
-    if (mode === 'web' || mode === 'voids') {
+    if (mode === 'random') {
+        const maxRadius = spread * 2.2;
+        for (let i = 0; i < PARTICLES; i++) {
+            const idx = i * 4;
+            const pos = randomShapePosition(spread * 1.2);
+            const x = pos.x;
+            const y = pos.y;
+            const z = pos.z;
+            const vx = (Math.random() - 0.5) * 40.0;
+            const vy = (Math.random() - 0.5) * 40.0;
+            const vz = (Math.random() - 0.5) * 40.0;
+
+            const radius = Math.sqrt(x * x + y * y + z * z);
+            const edgeBias = Math.min(radius / maxRadius, 1.0);
+            const coreFuzz = Math.random() * 1.5;
+            const mass = 0.5 + (edgeBias * 6.5) + coreFuzz;
+
+            dataPos[idx] = x;
+            dataPos[idx + 1] = y;
+            dataPos[idx + 2] = z;
+            dataPos[idx + 3] = mass;
+            dataVel[idx] = vx;
+            dataVel[idx + 1] = vy;
+            dataVel[idx + 2] = vz;
+            dataVel[idx + 3] = 0;
+        }
+    } else if (mode === 'web' || mode === 'voids') {
         // --- ALGORITHM: PROCEDURAL FILAMENTS & VOIDS ---
         
         // 1. Generate Structural Nodes (Galaxy Clusters)
         const nodeCount = 40;
         const nodes = [];
+        const nodeRadius = spread * 0.7;
         for(let i=0; i<nodeCount; i++) {
-            nodes.push(new THREE.Vector3(
-                (Math.random()-0.5) * spread,
-                (Math.random()-0.5) * spread,
-                (Math.random()-0.5) * spread
-            ));
+            nodes.push(randomPointInSphere(nodeRadius));
         }
 
         // 2. Generate Connectivity (Edges/Filaments)
@@ -457,10 +699,11 @@ function initData(mode) {
             const isBackround = Math.random() < 0.05; // 5% background radiation particles
 
             if (isBackround && mode !== 'voids') {
-                // Randomly scattered particles (Voids aren't perfectly empty)
-                x = (Math.random()-0.5) * spread * 1.5;
-                y = (Math.random()-0.5) * spread * 1.5;
-                z = (Math.random()-0.5) * spread * 1.5;
+                const backgroundRadius = spread * 1.1;
+                const backgroundPos = randomPointInSphere(backgroundRadius);
+                x = backgroundPos.x;
+                y = backgroundPos.y;
+                z = backgroundPos.z;
                 m = 0.5; // Light
                 vx = vy = vz = 0;
             } else {
@@ -506,11 +749,6 @@ function initData(mode) {
                 // Mass depends on density
                 m = (1.0 - (r/thickness)) * 3.0;
                 if (m < 0.5) m = 0.5;
-
-                // Super Cluster Cores
-                if (t < 0.05 || t > 0.95) {
-                    m = 10.0 + Math.random() * 20.0; // Heavy cluster center
-                }
 
                 // Initial Velocity:
                 // 1. Flow along filament towards nearest node
@@ -639,10 +877,19 @@ function initMaterials() {
     });
     matVel = new THREE.ShaderMaterial({
         uniforms: { 
-            texPos: {value:null}, texVel: {value:null}, texGrid: {value:null}, delta: {value:0.0},
+            texPos: {value:null},
+            texVel: {value:null},
+            texGrid: {value:null},
+            texGridCoarse: {value:null},
+            delta: {value:0.0},
             gravityConstant: {value: GRAVITY_CONSTANT * UNIVERSE_SCALE},
             softening: {value: SOFTENING},
-            gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:GRID_CELL_SIZE}
+            gridDim: {value:GRID_DIM},
+            gridTexWidth: {value:GRID_TEX_WIDTH},
+            gridCellSize: {value:GRID_CELL_SIZE},
+            coarseGridDim: {value:COARSE_GRID_DIM},
+            coarseGridTexWidth: {value:COARSE_GRID_TEX_WIDTH},
+            coarseGridCellSize: {value:COARSE_GRID_CELL_SIZE}
         },
         vertexShader: vsPass, fragmentShader: fsVelocity
     });
@@ -650,8 +897,12 @@ function initMaterials() {
         uniforms: { texPos: {value:null}, gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:GRID_CELL_SIZE} },
         vertexShader: vsAggregator, fragmentShader: fsAggregator, blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false
     });
+    matGridCoarse = new THREE.ShaderMaterial({
+        uniforms: { texPos: {value:null}, gridDim: {value:COARSE_GRID_DIM}, gridTexWidth: {value:COARSE_GRID_TEX_WIDTH}, gridCellSize: {value:COARSE_GRID_CELL_SIZE} },
+        vertexShader: vsAggregator, fragmentShader: fsAggregator, blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false
+    });
     matDisplay = new THREE.ShaderMaterial({
-        uniforms: { texPos: {value:null}, texVel: {value:null} },
+        uniforms: { texPos: {value:null} },
         vertexShader: vsVisual, fragmentShader: fsVisual, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
     });
 }
@@ -669,10 +920,44 @@ function initParticles() {
     geo.setAttribute('position', new THREE.BufferAttribute(uvs, 3));
     
     sceneSim.add(new THREE.Mesh(geometryQuad, matPos)); 
-    sceneGrid.add(new THREE.Points(geo, matGrid)); 
+    gridPoints = new THREE.Points(geo, matGrid);
+    sceneGrid.add(gridPoints); 
     const displayPoints = new THREE.Points(geo, matDisplay);
     displayPoints.frustumCulled = false;
     scene.add(displayPoints); 
+}
+
+function runPhysicsStep(deltaStep) {
+    renderer.setRenderTarget(fboGrid);
+    renderer.clearColor();
+    gridPoints.material = matGrid;
+    matGrid.uniforms.texPos.value = fboPos1.texture;
+    renderer.render(sceneGrid, cameraSim);
+
+    renderer.setRenderTarget(fboGridCoarse);
+    renderer.clearColor();
+    gridPoints.material = matGridCoarse;
+    matGridCoarse.uniforms.texPos.value = fboPos1.texture;
+    renderer.render(sceneGrid, cameraSim);
+    gridPoints.material = matGrid;
+
+    sceneSim.children[0].material = matVel;
+    matVel.uniforms.texPos.value = fboPos1.texture;
+    matVel.uniforms.texVel.value = fboVel1.texture;
+    matVel.uniforms.texGrid.value = fboGrid.texture;
+    matVel.uniforms.texGridCoarse.value = fboGridCoarse.texture;
+    matVel.uniforms.delta.value = deltaStep;
+    renderer.setRenderTarget(fboVel2);
+    renderer.render(sceneSim, cameraSim);
+    let swap = fboVel1; fboVel1 = fboVel2; fboVel2 = swap;
+
+    sceneSim.children[0].material = matPos;
+    matPos.uniforms.texPos.value = fboPos1.texture;
+    matPos.uniforms.texVel.value = fboVel1.texture;
+    matPos.uniforms.delta.value = deltaStep;
+    renderer.setRenderTarget(fboPos2);
+    renderer.render(sceneSim, cameraSim);
+    swap = fboPos1; fboPos1 = fboPos2; fboPos2 = swap;
 }
 
 function formatNumber(num) { return num.toLocaleString('en-US'); }
@@ -689,14 +974,16 @@ function reinitializeSimulation() {
     if (fboPos1) fboPos1.dispose(); if (fboPos2) fboPos2.dispose();
     if (fboVel1) fboVel1.dispose(); if (fboVel2) fboVel2.dispose();
     if (fboGrid) fboGrid.dispose();
+    if (fboGridCoarse) fboGridCoarse.dispose();
     
     while(sceneSim.children.length > 0) sceneSim.remove(sceneSim.children[0]);
     while(sceneGrid.children.length > 0) sceneGrid.remove(sceneGrid.children[0]);
-    while(scene.children.length > 0) {
-        const obj = scene.children[0];
-        if (obj instanceof THREE.Points) {
-            scene.remove(obj); obj.geometry.dispose(); obj.material.dispose();
-        } else scene.remove(obj);
+    for (let i = scene.children.length - 1; i >= 0; i--) {
+        const obj = scene.children[i];
+        if (obj.userData && obj.userData.persistent) continue;
+        scene.remove(obj);
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
     }
     
     initFBOs();
@@ -725,6 +1012,15 @@ function setupUI() {
     
     // Initialize duration
     recordingDuration = parseFloat(durationInput.value) * 60;
+
+    if (toggleUiBtn) {
+        toggleUiBtn.addEventListener('click', () => {
+            uiVisible = !uiVisible;
+            uiLayerElement.style.display = uiVisible ? 'block' : 'none';
+            toggleUiBtn.textContent = uiVisible ? 'Hide UI' : 'Show UI';
+            toggleUiBtn.setAttribute('aria-pressed', (!uiVisible).toString());
+        });
+    }
 }
 
 async function toggleRecording() {
@@ -863,33 +1159,22 @@ function animate() {
     }
 
     if (simSpeed > 0) {
-        // Physics Pipeline
-        renderer.setRenderTarget(fboGrid); renderer.clearColor();
-        matGrid.uniforms.texPos.value = fboPos1.texture;
-        renderer.render(sceneGrid, cameraSim);
-
-        sceneSim.children[0].material = matVel;
-        matVel.uniforms.texPos.value = fboPos1.texture;
-        matVel.uniforms.texVel.value = fboVel1.texture;
-        matVel.uniforms.texGrid.value = fboGrid.texture;
-        matVel.uniforms.delta.value = dt * simSpeed;
-        renderer.setRenderTarget(fboVel2); renderer.render(sceneSim, cameraSim);
-        let t = fboVel1; fboVel1 = fboVel2; fboVel2 = t;
-
-        sceneSim.children[0].material = matPos;
-        matPos.uniforms.texPos.value = fboPos1.texture;
-        matPos.uniforms.texVel.value = fboVel1.texture;
-        matPos.uniforms.delta.value = dt * simSpeed;
-        renderer.setRenderTarget(fboPos2); renderer.render(sceneSim, cameraSim);
-        t = fboPos1; fboPos1 = fboPos2; fboPos2 = t;
+        let remaining = dt * simSpeed;
+        let loops = 0;
+        while (remaining > 1e-6 && loops < 12) { // cap loops to prevent spiraling
+            const step = Math.min(remaining, MAX_PHYS_STEP);
+            runPhysicsStep(step);
+            remaining -= step;
+            loops++;
+        }
     }
 
     renderer.setRenderTarget(null);
     matDisplay.uniforms.texPos.value = fboPos1.texture;
-    matDisplay.uniforms.texVel.value = fboVel1.texture;
     
     // Smooth Camera Movement
-    const moveSpeed = 400 * dt * UNIVERSE_SCALE;
+    const boost = keys['shift'] ? CAMERA_SHIFT_MULT : 1.0;
+    const moveSpeed = 400 * dt * UNIVERSE_SCALE * boost;
     const fwd = new THREE.Vector3(); 
     camera.getWorldDirection(fwd);
     const rgt = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
@@ -903,6 +1188,9 @@ function animate() {
     // Update controls target to follow camera movement
     controls.target.copy(camera.position).addScaledVector(fwd, 100 * UNIVERSE_SCALE);
     controls.update();
+
+    if (starField) starField.rotation.y += STARFIELD_ROT_SPEED;
+    if (dustField) dustField.rotation.y -= DUST_ROT_SPEED;
     
     renderer.render(scene, camera);
 }
