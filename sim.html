@@ -2,1245 +2,798 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cosmic Web - N-Body Simulation</title>
+    <title>N-Body: Cube & Black Holes</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #050505; font-family: 'Segoe UI', sans-serif; }
+        body { margin: 0; background-color: #010103; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
         canvas { display: block; }
-        
-        #ui-layer {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            width: 320px;
-            padding: 20px;
-            background: rgba(15, 18, 25, 0.9);
-            border: 1px solid rgba(0, 229, 255, 0.2);
-            border-left: 3px solid #00e5ff;
-            border-radius: 4px;
-            backdrop-filter: blur(12px);
-            color: #ccc;
-            user-select: none;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        #ui {
+            position: absolute; top: 20px; left: 20px; width: 280px;
+            color: #88aaff; background: rgba(0, 5, 15, 0.9);
+            border: 1px solid #335588; padding: 15px;
+            font-family: 'Courier New', monospace;
+            pointer-events: auto; user-select: none; z-index: 10;
+            box-shadow: 0 0 20px rgba(0,10,30,0.8);
         }
-
-        h1 { margin: 0 0 15px 0; font-size: 16px; text-transform: uppercase; letter-spacing: 2px; color: #00e5ff; font-weight: 800; }
-        .stat { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; color: #8a9ba8; }
-        .val { font-family: 'Courier New', monospace; color: #fff; font-weight: bold; }
-
-        .controls { margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; }
-        label { display: block; font-size: 11px; color: #00e5ff; margin-bottom: 6px; margin-top: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-        
-        input[type="range"] { width: 100%; height: 4px; background: #333; border-radius: 2px; -webkit-appearance: none; margin-bottom: 5px; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: #fff; border-radius: 50%; cursor: pointer; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
-        
-        select { width: 100%; background: #111; color: #fff; border: 1px solid #333; padding: 8px; border-radius: 4px; font-size: 12px; font-family: 'Courier New', monospace; outline: none; }
-        select:focus { border-color: #00e5ff; }
-
-        #toggleUiBtn {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 10px 14px;
-            border-radius: 4px;
-            border: 1px solid rgba(0, 229, 255, 0.4);
-            background: rgba(5, 5, 5, 0.8);
-            color: #00e5ff;
-            font-size: 11px;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            cursor: pointer;
-            z-index: 10;
-            transition: background 0.2s ease;
-            width: auto;
-            min-width: 120px;
-            text-align: center;
-            display: inline-flex;
-            justify-content: center;
-            gap: 4px;
+        h1 { margin: 0 0 10px 0; font-size: 16px; text-transform: uppercase; border-bottom: 1px solid #335588; padding-bottom: 5px; color: #ddeeff; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px; }
+        input[type=range] { width: 100%; margin: 5px 0 10px 0; -webkit-appearance: none; background: #001133; height: 2px; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: #4488ff; border-radius: 50%; cursor: pointer; box-shadow: 0 0 5px #4488ff; }
+        button { 
+            width: 100%; background: #002244; color: #88ccff; border: 1px solid #335588; 
+            padding: 8px; cursor: pointer; text-transform: uppercase; font-weight: bold; margin-top: 10px;
         }
-        #toggleUiBtn:hover {
-            background: rgba(0, 229, 255, 0.2);
+        button:hover { background: #4488ff; color: #000; box-shadow: 0 0 10px #4488ff; }
+        .note { font-size: 10px; color: #6688aa; margin-top: 5px; font-style: italic; }
+        #loadingScreen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #010103; z-index: 1000; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
+            color: #88aaff; font-family: 'Courier New', monospace;
         }
-        #toggleUiBtn:focus-visible {
-            outline: 2px solid #00e5ff;
-            outline-offset: 2px;
+        #loadingScreen.hidden { display: none; }
+        .loadingSpinner {
+            width: 60px; height: 60px; border: 4px solid rgba(68, 136, 255, 0.2);
+            border-top-color: #4488ff; border-radius: 50%; animation: spin 1s linear infinite;
+            margin-bottom: 20px; box-shadow: 0 0 15px rgba(68, 136, 255, 0.3);
         }
-
-        button {
-            width: 100%; margin-top: 15px; padding: 10px; background: rgba(0, 229, 255, 0.1); border: 1px solid #00e5ff; 
-            color: #00e5ff; font-size: 11px; text-transform: uppercase; font-weight: bold; cursor: pointer; letter-spacing: 1px;
-            transition: all 0.2s;
-        }
-        button:hover { background: #00e5ff; color: #000; box-shadow: 0 0 15px rgba(0, 229, 255, 0.4); }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        button.recording { background: #ff3333; border-color: #ff3333; color: #fff; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
-        
-        input[type="number"] { width: 100%; background: #111; color: #fff; border: 1px solid #333; padding: 8px; border-radius: 4px; font-size: 12px; font-family: 'Courier New', monospace; outline: none; margin-bottom: 5px; }
-        input[type="number"]:focus { border-color: #00e5ff; }
-        
-        #recordingStatus { font-size: 10px; color: #ff3333; text-align: center; margin-top: 8px; display: none; font-family: monospace; }
-        
-        #warning {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            color: #ff3333; background: rgba(0,0,0,0.9); padding: 20px; text-align: center;
-            display: none; border: 1px solid #ff3333;
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loadingText { font-size: 18px; margin-bottom: 10px; color: #ddeeff; }
+        .loadingProgress { font-size: 14px; color: #6688aa; }
     </style>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
 </head>
 <body>
 
-<div id="ui-layer">
-    <h1>Cosmic N-Body Sim</h1>
-    <div class="stat"><span>PARTICLES</span> <span class="val" id="particleCount">131,072</span></div>
-    <div class="stat"><span>COMPUTE GRID</span> <span class="val">64x64x16</span></div>
-    <div class="stat"><span>SIMULATION TIME</span> <span class="val" id="fps">0 FPS</span></div>
+<div id="loadingScreen">
+    <div class="loadingSpinner"></div>
+    <div class="loadingText">Initializing Universe</div>
+    <div class="loadingProgress" id="loadingProgress">Preparing...</div>
+</div>
+
+<div id="ui">
+    <h1>Cube & Black Holes</h1>
+    <div class="row"><span>Particles:</span> <span id="countDisplay">65536</span></div>
+    <div class="row"><span>Nodes:</span> <span id="nodeDisplay">0</span></div>
+    <div class="row"><span>FPS:</span> <span id="fpsDisplay">0</span></div>
     
-    <div class="controls">
-        <label>Particle Density (Reset Required)</label>
-        <input type="range" id="particleCountSlider" min="16384" max="5000000" step="50000" value="131072">
-        <div style="font-size: 10px; color: #666; text-align: right;" id="particleCountDisplay">131,072</div>
-        
-        <label>Time Step (Speed)</label>
-        <input type="range" id="speed" min="0" max="4" step="0.05" value="0.2">
-        
-        <label>Initial Conditions</label>
-        <select id="configSelect">
-            <option value="web">CDM Cosmic Web (Filaments)</option>
-            <option value="voids">Deep Field Voids (Bubbles)</option>
-            <option value="random">Chaotic Scatter (Random)</option>
-            <option value="collision">Galactic Merger</option>
-            <option value="cluster">Globular Cluster</option>
-        </select>
+    <label>Theta (Accuracy vs Speed)</label>
+    <input type="range" id="thetaSlider" min="0.1" max="1.5" step="0.1" value="0.5">
+    
+    <label>Tree Update Rate</label>
+    <div class="row" style="margin-bottom:0"><span style="font-size:10px">Updates tree every X frames</span></div>
+    <input type="range" id="treeRateSlider" min="1" max="10" step="1" value="2">
 
-        <button id="resetBtn">Re-Initialize Simulation</button>
-        
-        <div style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
-            <label>Video Recording Duration (minutes)</label>
-            <input type="number" id="recordingDuration" min="0.1" max="60" step="0.1" value="5">
-            <button id="recordBtn">Start Recording</button>
-            <div id="recordingStatus"></div>
-        </div>
-        
-        <div style="font-size: 10px; color: #445; margin-top: 15px; text-align: center; font-family: monospace;">
-            [WASD] Navigate | [L-Click] Rotate
-        </div>
-    </div>
- </div>
+    <label>Sim Speed: <span id="speedValue">1.0x</span></label>
+    <input type="range" id="speedSlider" min="0" max="50.0" step="0.1" value="1.0">
 
-<button id="toggleUiBtn" aria-pressed="false">Hide UI</button>
+    <label>Particle Count</label>
+    <input type="range" id="particleCountSlider" min="4096" max="131072" step="4096" value="65536">
+    <div class="row" style="margin-top: -5px;"><span style="font-size:10px" id="particleCountValue">65536</span></div>
 
-<div id="warning">Floating Point Textures not supported on this device.</div>
+    <button id="resetBtn">Reset: Spawn Cube</button>
+    <div class="note">WASD + QE + Shift to fly</div>
+</div>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+</script>
 
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
-let TEXTURE_WIDTH = 362; 
-let PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
-// --- PHYSICS TUNING ---
-// Increased gravity to compensate for higher softening
-const GRAVITY_CONSTANT = 18.0; 
+// --- CONFIGURATION ---
+let COUNT = 65536; 
+function getTextureWidth(count) {
+    return Math.ceil(Math.sqrt(count));
+}
+let TEXTURE_WIDTH = getTextureWidth(COUNT);
+let MAX_NODES = COUNT * 2; 
+const NODE_TEX_WIDTH = 256; 
+const MAX_TREE_DEPTH = 32;
 
-// Increased softening to blur the "grid lines" artifact
-const SOFTENING = 45.0; 
+// Physics Config
+let THETA = 0.5;
+const BASE_DT = 0.01; 
+let TIME_STEP = BASE_DT; 
 
-const UNIVERSE_SCALE = 5.0;
-const GRID_HALF_EXTENT = 1200 * UNIVERSE_SCALE;
+let TREE_UPDATE_INTERVAL = 2; 
+const GRAVITY = 1.5; 
+const SOFTENING = 4.0; 
 
-// --- HIGH RES GRID SETTINGS ---
-// We increase DIM to 32 to make the cells smaller (Higher Resolution)
-const GRID_DIM = 32; 
-// sqrt(32^3) = 181.01, so 182 is the safe texture width
-const GRID_TEX_WIDTH = 182; 
+// --- MEMORY POOLS (CPU) ---
+const poolNext = new Int32Array(MAX_NODES * 8); 
+const poolCount = new Int32Array(MAX_NODES);    
+const poolMass = new Float32Array(MAX_NODES);
+const poolPosX = new Float32Array(MAX_NODES);
+const poolPosY = new Float32Array(MAX_NODES);
+const poolPosZ = new Float32Array(MAX_NODES);
+const poolMin = new Float32Array(MAX_NODES * 3);
+const poolMax = new Float32Array(MAX_NODES * 3);
 
-const GRID_CELL_SIZE = (GRID_HALF_EXTENT * 2.0) / GRID_DIM;
+// Texture Data Buffers
+const treeDataPosMass = new Float32Array(NODE_TEX_WIDTH * NODE_TEX_WIDTH * 4);
+const treeDataInfo = new Float32Array(NODE_TEX_WIDTH * NODE_TEX_WIDTH * 4);
 
-// --- COARSE GRID TUNING ---
-// We bump this to 8 to fill the gaps in the long-range gravity
-const COARSE_GRID_DIM = 8;
-// sqrt(8^3) = 22.6, so 24 is safe
-const COARSE_GRID_TEX_WIDTH = 24; 
-const COARSE_GRID_CELL_SIZE = (GRID_HALF_EXTENT * 2.0) / COARSE_GRID_DIM;
+let nodePtr = 0; 
+let gpuSerialIndex = 0;
 
-const MAX_PHYS_STEP = 0.045; 
+function resetPool() { nodePtr = 0; }
 
-const CAMERA_SHIFT_MULT = 3.0;
-
-const STARFIELD_COUNT = 3200;
-const STARFIELD_RADIUS = 28000 * UNIVERSE_SCALE;
-const STARFIELD_ROT_SPEED = 0.000015;
-const DUST_COUNT = 2600;
-const DUST_RADIUS = 17000 * UNIVERSE_SCALE;
-const DUST_FLATTENING = 0.32;
-const DUST_ROT_SPEED = 0.00004;
-
-function randomDirection() {
-    const theta = Math.random() * Math.PI * 2.0;
-    const phi = Math.acos(2.0 * Math.random() - 1.0);
-    const sinPhi = Math.sin(phi);
-    return new THREE.Vector3(
-        sinPhi * Math.cos(theta),
-        sinPhi * Math.sin(theta),
-        Math.cos(phi)
-    );
+function allocNode(minX, minY, minZ, maxX, maxY, maxZ) {
+    const id = nodePtr++;
+    if (id >= MAX_NODES) return -1; 
+    poolMass[id] = 0;
+    poolPosX[id] = 0; poolPosY[id] = 0; poolPosZ[id] = 0;
+    poolCount[id] = 0;
+    const idx3 = id * 3;
+    poolMin[idx3] = minX; poolMin[idx3+1] = minY; poolMin[idx3+2] = minZ;
+    poolMax[idx3] = maxX; poolMax[idx3+1] = maxY; poolMax[idx3+2] = maxZ;
+    const idx8 = id * 8;
+    for(let i=0; i<8; i++) poolNext[idx8+i] = -1;
+    return id;
 }
 
-function randomShapePosition(radiusScale) {
-    const baseDir = randomDirection();
-    const axisScale = new THREE.Vector3(
-        0.7 + Math.random() * 0.8,
-        0.7 + Math.random() * 0.8,
-        0.7 + Math.random() * 0.8
-    );
-    const scaledDir = new THREE.Vector3(
-        baseDir.x * axisScale.x,
-        baseDir.y * axisScale.y,
-        baseDir.z * axisScale.z
-    ).normalize();
-    const noise = (Math.sin(baseDir.x * 6.3) + Math.cos(baseDir.y * 4.2) + Math.sin(baseDir.z * 5.1)) * 0.15;
-    const radius = Math.pow(Math.random(), 1.0 / 3.0) * radiusScale;
-    const finalRadius = Math.max(radiusScale * 0.05, radius * (1.0 + noise));
-    return scaledDir.multiplyScalar(finalRadius);
-}
-
-function randomPointInSphere(radius) {
-    const cosPhi = Math.random() * 2.0 - 1.0;
-    const sinPhi = Math.sqrt(Math.max(0.0, 1.0 - cosPhi * cosPhi));
-    const theta = Math.random() * Math.PI * 2.0;
-    const r = Math.pow(Math.random(), 1.0 / 3.0) * radius;
-    return new THREE.Vector3(
-        r * sinPhi * Math.cos(theta),
-        r * sinPhi * Math.sin(theta),
-        r * cosPhi
-    );
-}
-
-function createGlowTexture(size = 96) {
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    gradient.addColorStop(0, 'rgba(255,255,255,1)');
-    gradient.addColorStop(0.4, 'rgba(255,255,255,0.35)');
-    gradient.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, size, size);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.needsUpdate = true;
-    return texture;
-}
-
-function createStarfield(count, radius, texture) {
-    const positions = new Float32Array(count * 3);
-    const colors = new Float32Array(count * 3);
-    const colorHelper = new THREE.Color();
-    for (let i = 0; i < count; i++) {
-        const phi = Math.acos(2.0 * Math.random() - 1.0);
-        const theta = Math.random() * Math.PI * 2.0;
-        const r = radius * Math.pow(Math.random(), 1 / 3);
-        positions[i * 3] = Math.sin(phi) * Math.cos(theta) * r;
-        positions[i * 3 + 1] = Math.sin(phi) * Math.sin(theta) * r;
-        positions[i * 3 + 2] = Math.cos(phi) * r;
-
-        colorHelper.setHSL(0.55 + (Math.random() - 0.5) * 0.2, 0.7, 0.4 + Math.random() * 0.35);
-        colors[i * 3] = colorHelper.r;
-        colors[i * 3 + 1] = colorHelper.g;
-        colors[i * 3 + 2] = colorHelper.b;
+function insertParticle(nodeId, x, y, z, m, depth) {
+    if (nodeId === -1) return;
+    const pm = poolMass[nodeId];
+    const newMass = pm + m;
+    if (newMass > 0) {
+        poolPosX[nodeId] = (poolPosX[nodeId] * pm + x * m) / newMass;
+        poolPosY[nodeId] = (poolPosY[nodeId] * pm + y * m) / newMass;
+        poolPosZ[nodeId] = (poolPosZ[nodeId] * pm + z * m) / newMass;
     }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const material = new THREE.PointsMaterial({
-        size: 3.2,
-        map: texture,
-        vertexColors: true,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        sizeAttenuation: true
-    });
-    material.opacity = 0.8;
-
-    return new THREE.Points(geometry, material);
-}
-
-function createDustField(count, radius, texture) {
-    const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-        const angle = Math.random() * Math.PI * 2.0;
-        const radial = Math.pow(Math.random(), 0.6) * radius;
-        const height = (Math.random() - 0.5) * radius * 0.05;
-        positions[i * 3] = Math.cos(angle) * radial;
-        positions[i * 3 + 1] = height * DUST_FLATTENING;
-        positions[i * 3 + 2] = Math.sin(angle) * radial;
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const material = new THREE.PointsMaterial({
-        size: 180,
-        map: texture,
-        transparent: true,
-        opacity: 0.08,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        sizeAttenuation: true,
-        color: new THREE.Color(0.45, 0.65, 1.0)
-    });
-
-    return new THREE.Points(geometry, material);
-}
-
-// --- Shaders ---
-
-const vsPass = `
-    varying vec2 vUv;
-    void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-    }
-`;
-
-const fsPosition = `
-    uniform sampler2D texPos;
-    uniform sampler2D texVel;
-    uniform float delta;
-    varying vec2 vUv;
-
-    void main() {
-        vec4 posState = texture2D(texPos, vUv);
-        vec3 pos = posState.xyz;
-        float mass = posState.w;
-        vec3 vel = texture2D(texVel, vUv).xyz;
-
-        pos += vel * delta;
-
-        gl_FragColor = vec4(pos, mass);
-    }
-`;
-
-const vsAggregator = `
-    uniform sampler2D texPos;
-    uniform float gridDim; 
-    uniform float gridTexWidth; 
-    uniform float gridCellSize;
+    poolMass[nodeId] = newMass;
+    poolCount[nodeId]++; 
+    if (depth > MAX_TREE_DEPTH) return;
     
-    varying vec4 vParticleData;
+    const idx3 = nodeId * 3;
+    const minX = poolMin[idx3], minY = poolMin[idx3+1], minZ = poolMin[idx3+2];
+    const maxX = poolMax[idx3], maxY = poolMax[idx3+1], maxZ = poolMax[idx3+2];
+    
+    const cx = (minX + maxX) * 0.5;
+    const cy = (minY + maxY) * 0.5;
+    const cz = (minZ + maxZ) * 0.5;
 
-    void main() {
-        vec4 pData = texture2D(texPos, position.xy);
-        vParticleData = pData;
-        
-        float halfGrid = gridDim * 0.5;
-        vec3 gridCoord = floor((pData.xyz / gridCellSize) + halfGrid);
-        gridCoord = clamp(gridCoord, vec3(0.0), vec3(gridDim - 1.0));
-        
-        float index = gridCoord.x + gridCoord.y * gridDim + gridCoord.z * gridDim * gridDim;
-        
-        float col = mod(index, gridTexWidth);
-        float row = floor(index / gridTexWidth);
-        
-        vec2 screenUV = (vec2(col, row) + 0.5) / gridTexWidth;
-        
-        gl_Position = vec4(screenUV * 2.0 - 1.0, 0.0, 1.0);
-        gl_PointSize = 1.0;
+    let octant = 0;
+    if (x >= cx) octant |= 1;
+    if (y >= cy) octant |= 2;
+    if (z >= cz) octant |= 4;
+
+    let childId = poolNext[nodeId*8 + octant];
+
+    if (childId === -1) {
+        const nMinX = (octant & 1) ? cx : minX;
+        const nMaxX = (octant & 1) ? maxX : cx;
+        const nMinY = (octant & 2) ? cy : minY;
+        const nMaxY = (octant & 2) ? maxY : cy;
+        const nMinZ = (octant & 4) ? cz : minZ;
+        const nMaxZ = (octant & 4) ? maxZ : cz;
+
+        childId = allocNode(nMinX, nMinY, nMinZ, nMaxX, nMaxY, nMaxZ);
+        if (childId !== -1) {
+            poolNext[nodeId*8 + octant] = childId;
+            poolPosX[childId] = x; poolPosY[childId] = y; poolPosZ[childId] = z; 
+            poolMass[childId] = m; poolCount[childId] = 1;
+        }
+    } else {
+        insertParticle(childId, x, y, z, m, depth + 1);
     }
-`;
+}
 
-const fsAggregator = `
-    varying vec4 vParticleData;
-    void main() {
-        gl_FragColor = vec4(vParticleData.xyz * vParticleData.w, vParticleData.w);
+function flattenAndSerialize(nodeId) {
+    const myIndex = gpuSerialIndex++;
+    const idx4 = myIndex * 4;
+    treeDataPosMass[idx4+0] = poolPosX[nodeId];
+    treeDataPosMass[idx4+1] = poolPosY[nodeId];
+    treeDataPosMass[idx4+2] = poolPosZ[nodeId];
+    treeDataPosMass[idx4+3] = poolMass[nodeId];
+
+    const idx3 = nodeId * 3;
+    const size = Math.max(poolMax[idx3] - poolMin[idx3], Math.max(poolMax[idx3+1] - poolMin[idx3+1], poolMax[idx3+2] - poolMin[idx3+2]));
+    treeDataInfo[idx4+2] = size;
+
+    let hasChildren = false;
+    const nodeBase = nodeId * 8;
+    for(let i=0; i<8; i++) {
+        if (poolNext[nodeBase+i] !== -1) { hasChildren = true; break; }
     }
-`;
 
-const fsVelocity = `
-    uniform sampler2D texPos;
-    uniform sampler2D texVel;
-    uniform sampler2D texGrid;
-    uniform sampler2D texGridCoarse;
+    if (hasChildren) {
+        for(let i=0; i<8; i++) {
+            const childId = poolNext[nodeBase+i];
+            if (childId !== -1) flattenAndSerialize(childId);
+        }
+    }
 
-    uniform float delta;
-    uniform float gravityConstant;
+    treeDataInfo[idx4+0] = hasChildren ? (myIndex + 1) : -1.0;
+    treeDataInfo[idx4+1] = gpuSerialIndex;
+}
+
+function updateTreeTexture() {
+    gpuSerialIndex = 0;
+    flattenAndSerialize(0);
+    document.getElementById('nodeDisplay').innerText = gpuSerialIndex;
+    texTreePos.image.data = treeDataPosMass; texTreePos.needsUpdate = true;
+    texTreeInfo.image.data = treeDataInfo; texTreeInfo.needsUpdate = true;
+}
+
+// --- THREE.JS SETUP ---
+let renderer, scene, camera, controls, composer;
+let texTreePos, texTreeInfo;
+let positions, velocities;
+let simScene, simCam, quad;
+let points, matPoints, geom;
+
+const vs = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`;
+
+const fsUpdate = `
+    uniform sampler2D tPos; 
+    uniform sampler2D tVel; 
+    uniform sampler2D tTreePos;
+    uniform sampler2D tTreeInfo;
+    uniform float dt;
+    uniform float theta;
+    uniform float G;
     uniform float softening;
-    uniform float gridDim; 
-    uniform float gridTexWidth; 
-    uniform float gridCellSize;
-    
-    uniform float coarseGridDim;
-    uniform float coarseGridTexWidth;
-    uniform float coarseGridCellSize;
-
+    uniform vec2 treeTexDim;
     varying vec2 vUv;
-
-    const int LOCAL_RADIUS = 1;
-    const int COARSE_GRID_DIM_CONST = ${COARSE_GRID_DIM};
-    const float COARSE_SKIP_RADIUS = 1.0;
-
-    void main() {
-        vec4 pData = texture2D(texPos, vUv);
-        vec3 myPos = pData.xyz;
-        float myMass = pData.w;
-        vec3 myVel = texture2D(texVel, vUv).xyz;
-        
-        vec3 acc = vec3(0.0);
-        float cellSize = gridCellSize;
-        float halfGrid = gridDim * 0.5;
-        vec3 myGridCoord = floor((myPos / cellSize) + halfGrid);
-        myGridCoord = clamp(myGridCoord, vec3(0.0), vec3(gridDim - 1.0));
-        float myCellIndex = myGridCoord.x + myGridCoord.y * gridDim + myGridCoord.z * gridDim * gridDim;
-
-        for (int dz = -LOCAL_RADIUS; dz <= LOCAL_RADIUS; dz++) {
-            for (int dy = -LOCAL_RADIUS; dy <= LOCAL_RADIUS; dy++) {
-                for (int dx = -LOCAL_RADIUS; dx <= LOCAL_RADIUS; dx++) {
-                    vec3 sampleCoord = myGridCoord + vec3(float(dx), float(dy), float(dz));
-                    sampleCoord = clamp(sampleCoord, vec3(0.0), vec3(gridDim - 1.0));
-                    float cellIndex = sampleCoord.x + sampleCoord.y * gridDim + sampleCoord.z * gridDim * gridDim;
-                    float col = mod(cellIndex, gridTexWidth);
-                    float row = floor(cellIndex / gridTexWidth);
-                    vec2 gridUV = (vec2(col, row) + 0.5) / gridTexWidth;
-                    vec4 cellData = texture2D(texGrid, gridUV);
-                    float cellMass = cellData.w;
-
-                    if (cellMass > 0.001) {
-                        vec3 cellSum = cellData.xyz;
-                        if (cellIndex == myCellIndex) {
-                            cellMass = max(0.0, cellMass - myMass);
-                            cellSum -= myPos * myMass;
-                        }
-                        if (cellMass > 0.001) {
-                            vec3 cellCoM = cellSum / cellMass;
-                            vec3 dir = cellCoM - myPos;
-                            float distSq = dot(dir, dir);
-                            float softSq = softening * softening;
-                            if (cellIndex == myCellIndex) {
-                                softSq = max(softSq, (cellSize * cellSize) * 0.25);
-                            }
-                            float invDist = inversesqrt(distSq + softSq);
-                            float invDist3 = invDist * invDist * invDist;
-                            acc += dir * (gravityConstant * cellMass * invDist3);
-                        }
-                    }
-                }
-            }
-        }
-
-        float coarseHalfGrid = coarseGridDim * 0.5;
-        vec3 myCoarseCoord = floor((myPos / coarseGridCellSize) + coarseHalfGrid);
-        myCoarseCoord = clamp(myCoarseCoord, vec3(0.0), vec3(coarseGridDim - 1.0));
-
-        for (int cz = 0; cz < COARSE_GRID_DIM_CONST; cz++) {
-            for (int cy = 0; cy < COARSE_GRID_DIM_CONST; cy++) {
-                for (int cx = 0; cx < COARSE_GRID_DIM_CONST; cx++) {
-                    vec3 coarseCoord = vec3(float(cx), float(cy), float(cz));
-                    vec3 diff = abs(coarseCoord - myCoarseCoord);
-                    if (diff.x <= COARSE_SKIP_RADIUS && diff.y <= COARSE_SKIP_RADIUS && diff.z <= COARSE_SKIP_RADIUS) {
-                        continue;
-                    }
-                    float coarseIndex = coarseCoord.x + coarseCoord.y * coarseGridDim + coarseCoord.z * coarseGridDim * coarseGridDim;
-                    float col = mod(coarseIndex, coarseGridTexWidth);
-                    float row = floor(coarseIndex / coarseGridTexWidth);
-                    vec2 coarseUV = (vec2(col, row) + 0.5) / coarseGridTexWidth;
-                    vec4 coarseData = texture2D(texGridCoarse, coarseUV);
-                    float coarseMass = coarseData.w;
-                    if (coarseMass > 0.001) {
-                        vec3 coarseCoM = coarseData.xyz / coarseMass;
-                        vec3 dir = coarseCoM - myPos;
-                        float distSq = dot(dir, dir);
-                        float softSq = softening * softening * 4.0;
-                        float invDist = inversesqrt(distSq + softSq);
-                        float invDist3 = invDist * invDist * invDist;
-                        acc += dir * (gravityConstant * coarseMass * invDist3 * 0.35);
-                    }
-                }
-            }
-        }
-        
-        // Drag - CRITICAL for galaxy formation
-        // We increase friction (0.992) to help particles "cool down" and settle into a disk
-        myVel *= 1.0;
-
-        // Dark Energy disabled for stability
-        // if (distFromCenter > 200.0) {
-        //      acc += expansionDir * expansionForce;
-        // }
-
-        myVel += acc * delta;
-        
-        gl_FragColor = vec4(myVel, 0.0);
-    }
-`;
-
-// VISUAL SHADER: Adds "Temperature" coloring based on local density/energy
-const vsVisual = `
-    uniform sampler2D texPos;
-    varying vec3 vColor;
-    varying float vAlpha;
-
-    void main() {
-        vec4 posData = texture2D(texPos, position.xy);
-        vec3 pos = posData.xyz;
-        float mass = posData.w;
-
-        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-        gl_Position = projectionMatrix * mvPosition;
-
-        float depth = -mvPosition.z;
-        depth = max(depth, 0.1);
-
-        float massNorm = clamp((mass - 0.5) / 49.5, 0.0, 1.0);
-        vec3 coolStar = vec3(1.0, 0.5, 0.2);
-        vec3 warmStar = vec3(1.0, 0.9, 0.7);
-        vec3 hotStar = vec3(0.6, 0.85, 1.0);
-
-        vec3 starColor = (massNorm < 0.5)
-            ? mix(coolStar, warmStar, massNorm * 2.0)
-            : mix(warmStar, hotStar, (massNorm - 0.5) * 2.0);
-
-        float intensity = pow(0.5 + massNorm * 0.5, 1.8);
-        vColor = starColor * (0.7 + intensity * 0.5);
-
-        float glow = clamp((mass * 0.05) / (depth * 0.002 + 0.05), 0.2, 1.0);
-        vAlpha = clamp(0.6 + glow, 0.0, 1.0);
-
-        float sizeBase = clamp(3600.0 / depth, 1.4, 4096.0);
-        float sizeMass = 1.0 + mass * 0.04;
-        gl_PointSize = sizeBase * sizeMass;
-    }
-`;
-
-const fsVisual = `
-    varying vec3 vColor;
-    varying float vAlpha;
-    void main() {
-        vec2 coord = gl_PointCoord - vec2(0.5);
-        float distSq = dot(coord, coord);
-        if (distSq > 0.25) discard;
-        
-        float strength = 1.0 - (distSq * 4.0);
-        strength = pow(strength, 1.4);
-        strength = min(1.0, strength * 1.35);
-        
-        gl_FragColor = vec4(vColor, vAlpha * strength);
-    }
-`;
-
-let renderer, scene, camera, controls;
-let simMode = 'web'; 
-let starField, dustField, glowTexture;
-
-let fboPos1, fboPos2, fboVel1, fboVel2, fboGrid, fboGridCoarse;
-let sceneSim, cameraSim, sceneGrid, geometryQuad;
-let matPos, matVel, matGrid, matGridCoarse, matDisplay;
-let gridPoints;
-
-let stats = { fps: 0, ms: 0 };
-let lastTime = 0;
-let frames = 0;
-let simSpeed = 0.2; // Slower default for majesty
-const keys = {};
-
-// Video recording variables
-let mediaRecorder = null;
-let recordedChunks = [];
-let recordingStartTime = 0;
-let recordingDuration = 0;
-let recordingTimer = null;
-let isRecording = false; 
-const uiLayerElement = document.getElementById('ui-layer');
-const toggleUiBtn = document.getElementById('toggleUiBtn');
-let uiVisible = true;
-
-init();
-animate();
-
-function init() {
-    const canvas = document.createElement('canvas');
-    document.body.appendChild(canvas);
     
-    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false, powerPreference: "high-performance" });
+    void main() {
+        vec4 posData = texture2D(tPos, vUv);
+        vec3 myPos = posData.xyz;
+        vec3 myVel = texture2D(tVel, vUv).xyz;
+        float myMass = posData.w;
+
+        vec3 acc = vec3(0.0);
+        float idx = 0.0;
+        
+        for(int i = 0; i < 512; i++) { 
+            vec2 uvNode = (vec2(mod(idx, treeTexDim.x), floor(idx / treeTexDim.x)) + 0.5) / treeTexDim;
+            vec4 nPosMass = texture2D(tTreePos, uvNode);
+            vec4 nInfo = texture2D(tTreeInfo, uvNode);
+            
+            vec3 nCom = nPosMass.xyz;
+            float nMass = nPosMass.w;
+            float childPtr = nInfo.x;
+            float skipPtr = nInfo.y;
+            float nSize = nInfo.z;
+
+            vec3 dir = nCom - myPos;
+            float distSq = dot(dir, dir);
+            float dist = sqrt(distSq);
+            
+            bool isLeaf = childPtr < -0.5;
+            bool farEnough = (nSize / dist) < theta;
+            
+            if (isLeaf || farEnough) {
+                if (dist > 0.1) {
+                    float f = (G * nMass) / pow(distSq + softening*softening, 1.5);
+                    acc += dir * f;
+                }
+                idx = skipPtr;
+            } else {
+                idx = childPtr;
+            }
+            if (idx >= treeTexDim.x * treeTexDim.y) break;
+        }
+
+        // Slight drag to prevent explosion, but allow orbits
+        myVel *= 0.9995; 
+        myVel += acc * dt;
+        gl_FragColor = vec4(myVel, 1.0);
+    }
+`;
+
+const fsPosUpdate = `
+    uniform sampler2D tPos;
+    uniform sampler2D tVel;
+    uniform float dt;
+    varying vec2 vUv;
+    void main() {
+        vec4 p = texture2D(tPos, vUv);
+        vec3 v = texture2D(tVel, vUv).xyz;
+        p.xyz += v * dt;
+        gl_FragColor = p;
+    }
+`;
+
+const vsParticles = `
+    uniform sampler2D tPos;
+    varying float vMass; 
+    void main() {
+        vec4 p = texture2D(tPos, position.xy);
+        vMass = p.w;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p.xyz, 1.0);
+        float dist = gl_Position.z;
+        // Adjusted size to be less overwhelming
+        gl_PointSize = (500.0 / dist) * (0.4 + p.w * 0.4);
+    }
+`;
+
+const fsParticles = `
+    varying float vMass;
+    void main() { 
+        vec2 coord = gl_PointCoord - vec2(0.5);
+        float d = length(coord) * 2.0;
+        if(d > 1.0) discard;
+        
+        float alpha = exp(-d * d * 3.0);
+
+        // Realistic palette
+        vec3 coldColor = vec3(0.05, 0.2, 0.6); // Darker blue
+        vec3 midColor = vec3(0.2, 0.5, 0.9);   // Filament blue
+        vec3 hotColor = vec3(1.0, 0.9, 0.6);   // Core white/yellow
+
+        // Normal particles mass ~1.0, Black holes ~1000.0
+        // We need to clamp this intelligently so black holes glow hot white
+        float massNorm = clamp((vMass - 1.0) / 4.0, 0.0, 1.0);
+        
+        // Special override for super massive objects
+        if (vMass > 100.0) {
+            massNorm = 1.5; // Trigger bright white/orange
+        }
+        
+        vec3 finalColor;
+        if (massNorm < 0.5) {
+            finalColor = mix(coldColor, midColor, massNorm * 2.0);
+        } else {
+            finalColor = mix(midColor, hotColor, clamp((massNorm - 0.5) * 2.0, 0.0, 1.0));
+        }
+
+        gl_FragColor = vec4(finalColor * 1.5, alpha); 
+    }
+`;
+
+let fboPos1, fboPos2, fboVel1, fboVel2;
+let matVelUpdate, matPosUpdate;
+let readBuffer; 
+
+// --- NEW SPAWNING LOGIC: CUBE WITH BLACK HOLES ---
+async function generateParticles() {
+    positions = new Float32Array(COUNT * 4);
+    velocities = new Float32Array(COUNT * 4);
+    readBuffer = new Float32Array(TEXTURE_WIDTH * TEXTURE_WIDTH * 4);
+
+    const loadingProgress = document.getElementById('loadingProgress');
+    loadingProgress.textContent = 'Generating Cube & Black Holes...';
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    const BATCH_SIZE = 5000;
+    
+    // CUBE DIMENSIONS
+    const CUBE_SIZE = 1000.0; // Total width is 2x this
+    const NUM_BLACK_HOLES = 12;
+
+    // 1. Create Black Hole positions
+    const blackHoles = [];
+    for(let i=0; i<NUM_BLACK_HOLES; i++) {
+        blackHoles.push({
+            x: (Math.random() - 0.5) * 2 * CUBE_SIZE * 0.8, // Keep them somewhat inside
+            y: (Math.random() - 0.5) * 2 * CUBE_SIZE * 0.8,
+            z: (Math.random() - 0.5) * 2 * CUBE_SIZE * 0.8,
+            mass: 800 + Math.random() * 800 // Very heavy
+        });
+    }
+
+    for(let i=0; i<COUNT; i++) {
+        let x, y, z, mass, vx, vy, vz;
+
+        // The first few particles ARE the black holes
+        if (i < NUM_BLACK_HOLES) {
+            x = blackHoles[i].x;
+            y = blackHoles[i].y;
+            z = blackHoles[i].z;
+            mass = blackHoles[i].mass;
+            vx = (Math.random()-0.5) * 2.0; // Drifting slowly
+            vy = (Math.random()-0.5) * 2.0;
+            vz = (Math.random()-0.5) * 2.0;
+        } else {
+            // Random Cube Distribution
+            x = (Math.random() - 0.5) * 2 * CUBE_SIZE;
+            y = (Math.random() - 0.5) * 2 * CUBE_SIZE;
+            z = (Math.random() - 0.5) * 2 * CUBE_SIZE;
+            mass = 1.0 + Math.random() * 2.0;
+
+            // VELOCITY LOGIC:
+            // Find the nearest Black Hole and orbit it.
+            // This creates "mini galaxies" inside the cube structure.
+            
+            let nearestBH = blackHoles[0];
+            let minDistSq = Infinity;
+            
+            for(let bh of blackHoles) {
+                const dx = x - bh.x;
+                const dy = y - bh.y;
+                const dz = z - bh.z;
+                const dSq = dx*dx + dy*dy + dz*dz;
+                if (dSq < minDistSq) {
+                    minDistSq = dSq;
+                    nearestBH = bh;
+                }
+            }
+            
+            const dist = Math.sqrt(minDistSq);
+            
+            // Vector pointing to BH
+            const toBH = new THREE.Vector3(nearestBH.x - x, nearestBH.y - y, nearestBH.z - z).normalize();
+            
+            // Random axis for orbit plane
+            const up = new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize();
+            
+            // Tangent vector (orbit direction)
+            const tangent = new THREE.Vector3().crossVectors(toBH, up).normalize();
+            
+            // Orbital Speed = sqrt(G * M / r)
+            // G is effectively built into our gravity constant, but we need rough stability
+            const orbitSpeed = Math.sqrt(1500.0 / (dist + 10.0)); // Tuned for visuals
+            
+            // Apply velocity + velocity of the BH itself
+            // Also add a little random noise
+            vx = tangent.x * orbitSpeed; 
+            vy = tangent.y * orbitSpeed;
+            vz = tangent.z * orbitSpeed;
+        }
+        
+        positions[i*4] = x;
+        positions[i*4+1] = y;
+        positions[i*4+2] = z;
+        positions[i*4+3] = mass;
+
+        velocities[i*4] = vx;
+        velocities[i*4+1] = vy;
+        velocities[i*4+2] = vz;
+
+        if (i % BATCH_SIZE === 0 || i === COUNT - 1) {
+            const progress = Math.floor(((i + 1) / COUNT) * 100);
+            loadingProgress.textContent = `Spawning Cube... ${progress}%`;
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+    }
+}
+
+async function resetSimulation() {
+    const loadingScreen = document.getElementById('loadingScreen');
+    const loadingProgress = document.getElementById('loadingProgress');
+    loadingScreen.classList.remove('hidden');
+    
+    await generateParticles();
+    
+    const tPos = new THREE.DataTexture(positions, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
+    const tVel = new THREE.DataTexture(velocities, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
+    tPos.needsUpdate = true; tVel.needsUpdate = true;
+    
+    if (fboPos1) fboPos1.dispose(); if (fboPos2) fboPos2.dispose();
+    if (fboVel1) fboVel1.dispose(); if (fboVel2) fboVel2.dispose();
+    
+    fboPos1 = new THREE.WebGLRenderTarget(TEXTURE_WIDTH, TEXTURE_WIDTH, { type: THREE.FloatType });
+    fboPos2 = fboPos1.clone();
+    fboVel1 = new THREE.WebGLRenderTarget(TEXTURE_WIDTH, TEXTURE_WIDTH, { type: THREE.FloatType });
+    fboVel2 = fboVel1.clone();
+
+    if (quad) {
+        quad.material.map = tPos;
+    } else {
+        simScene = new THREE.Scene();
+        simCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+        quad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), new THREE.MeshBasicMaterial({map: tPos}));
+        simScene.add(quad);
+    }
+    
+    renderer.setRenderTarget(fboPos1); renderer.render(simScene, simCam);
+    quad.material.map = tVel;
+    renderer.setRenderTarget(fboVel1); renderer.render(simScene, simCam);
+
+    if (geom) geom.dispose();
+    geom = new THREE.BufferGeometry();
+    const uvArr = new Float32Array(COUNT * 3);
+    for(let i=0; i<COUNT; i++) {
+        uvArr[i*3] = (i % TEXTURE_WIDTH) / TEXTURE_WIDTH + (0.5/TEXTURE_WIDTH);
+        uvArr[i*3+1] = Math.floor(i / TEXTURE_WIDTH) / TEXTURE_WIDTH + (0.5/TEXTURE_WIDTH);
+    }
+    geom.setAttribute('position', new THREE.BufferAttribute(uvArr, 3));
+
+    if (matPoints) matPoints.dispose();
+    matPoints = new THREE.ShaderMaterial({
+        uniforms: { tPos: { value: fboPos1.texture } },
+        vertexShader: vsParticles,
+        fragmentShader: fsParticles,
+        depthTest: false, blending: THREE.AdditiveBlending, transparent: true
+    });
+    
+    if (points) {
+        scene.remove(points);
+        points.geometry.dispose();
+        points.material.dispose();
+    }
+    points = new THREE.Points(geom, matPoints);
+    points.frustumCulled = false;
+    scene.add(points);
+    
+    document.getElementById('countDisplay').innerText = COUNT;
+    
+    // Populate pool arrays from newly generated positions for tree building
+    for(let i=0; i<COUNT; i++) {
+        const i4 = i*4;
+        poolPosX[i] = positions[i4];
+        poolPosY[i] = positions[i4+1];
+        poolPosZ[i] = positions[i4+2];
+        poolMass[i] = positions[i4+3];
+    }
+    
+    // Rebuild the tree with new particle data
+    buildTree();
+    
+    loadingProgress.textContent = 'Complete!';
+    await new Promise(resolve => setTimeout(resolve, 200));
+    loadingScreen.classList.add('hidden');
+}
+
+async function init() {
+    // --- UI INIT ---
+    const bind = (id, fn) => {
+        const el = document.getElementById(id);
+        if(el) el.addEventListener('input', fn);
+    };
+
+    bind('thetaSlider', e => { 
+        THETA = parseFloat(e.target.value); 
+        if(matVelUpdate) matVelUpdate.uniforms.theta.value = THETA; 
+    });
+    
+    bind('speedSlider', e => { 
+        const val = parseFloat(e.target.value);
+        TIME_STEP = val * BASE_DT;
+        document.getElementById('speedValue').innerText = val.toFixed(1) + 'x';
+    });
+    
+    bind('treeRateSlider', e => { TREE_UPDATE_INTERVAL = parseInt(e.target.value); });
+    
+    const particleCountSlider = document.getElementById('particleCountSlider');
+    const particleCountValue = document.getElementById('particleCountValue');
+    bind('particleCountSlider', e => {
+        const newCount = parseInt(e.target.value);
+        particleCountValue.textContent = newCount;
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', async () => {
+        isResetting = true; 
+        const newCount = parseInt(particleCountSlider.value);
+        if (newCount !== COUNT) {
+            COUNT = newCount;
+            TEXTURE_WIDTH = getTextureWidth(COUNT);
+            MAX_NODES = COUNT * 2;
+        }
+        await resetSimulation();
+        isResetting = false; 
+    });
+
+    renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance", logarithmicDepthBuffer: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x01030b, 1.0);
-    renderer.outputEncoding = THREE.sRGBEncoding;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.25;
-    renderer.physicallyCorrectLights = true;
+    renderer.setClearColor(new THREE.Color(0x010103));
+    document.body.appendChild(renderer.domElement);
     
     if (!renderer.capabilities.isWebGL2 && !renderer.extensions.get('OES_texture_float')) {
-        document.getElementById('warning').style.display = 'block';
-        return;
+        alert("Requires Float Texture support"); return;
     }
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x01030b);
-    // Dark background for deep space
-    scene.fog = new THREE.FogExp2(0x050505, 0.0002);
-    glowTexture = glowTexture || createGlowTexture(128);
-    starField = createStarfield(STARFIELD_COUNT, STARFIELD_RADIUS, glowTexture);
-    starField.userData.persistent = true;
-    scene.add(starField);
-    dustField = createDustField(DUST_COUNT, DUST_RADIUS, glowTexture);
-    dustField.userData.persistent = true;
-    scene.add(dustField);
-    
-    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.001, 100000 * UNIVERSE_SCALE);
-    camera.position.set(0, 0, 1200 * UNIVERSE_SCALE); // Start further back
-    
-    controls = new OrbitControls(camera, canvas);
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
+    // Move further back to see the giant cube
+    camera.position.set(0, 500, 1800);
+    controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.mouseButtons = {
-        LEFT: THREE.MOUSE.ROTATE,
-        MIDDLE: THREE.MOUSE.DOLLY,
-        RIGHT: THREE.MOUSE.PAN
-    };
+    controls.autoRotate = true; 
+    controls.autoRotateSpeed = 0.5; 
+    controls.maxDistance = 15000;
 
-    sceneSim = new THREE.Scene();
-    sceneGrid = new THREE.Scene();
-    cameraSim = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    geometryQuad = new THREE.PlaneGeometry(2, 2);
+    composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.2, 0.1);
+    composer.addPass(bloomPass);
 
-    initFBOs();
-    initMaterials();
-    initParticles();
-    setupUI();
-    window.addEventListener('resize', onResize);
-    
-    window.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
-    window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
-    window.addEventListener('blur', () => Object.keys(keys).forEach(k => keys[k] = false));
-}
-
-function createTexture() {
-    return new THREE.WebGLRenderTarget(TEXTURE_WIDTH, TEXTURE_WIDTH, {
-        type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter
+    window.addEventListener('resize', () => {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height);
+        composer.setSize(width, height);
     });
-}
 
-function createGridTarget(width) {
-    return new THREE.WebGLRenderTarget(width, width, {
-        type: THREE.FloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter
-    });
-}
-
-function initFBOs() {
-    fboPos1 = createTexture(); fboPos2 = createTexture();
-    fboVel1 = createTexture(); fboVel2 = createTexture();
-    fboGrid = createGridTarget(GRID_TEX_WIDTH);
-    fboGridCoarse = createGridTarget(COARSE_GRID_TEX_WIDTH);
-}
-
-// --- CORE GENERATION ALGORITHM ---
-function initData(mode) {
-    const dataPos = new Float32Array(PARTICLES * 4);
-    const dataVel = new Float32Array(PARTICLES * 4);
+    const loadingScreen = document.getElementById('loadingScreen');
+    const loadingProgress = document.getElementById('loadingProgress');
     
-    // Config vars
-    const spread = 2000 * UNIVERSE_SCALE;
+    await generateParticles();
+
+    const tPos = new THREE.DataTexture(positions, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
+    const tVel = new THREE.DataTexture(velocities, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
+    tPos.needsUpdate = true; tVel.needsUpdate = true;
     
-    if (mode === 'random') {
-        // --- DENSE CORE GALAXY (Softened) ---
-        const maxRadius = spread * 2.0; 
-        const blackHoleMass = 5000.0; 
-
-        for (let i = 0; i < PARTICLES; i++) {
-            const idx = i * 4;
-            
-            // --- PARTICLE 0: THE BLACK HOLE ---
-            if (i === 0) {
-                dataPos[idx] = 0; dataPos[idx+1] = 0; dataPos[idx+2] = 0; dataPos[idx+3] = blackHoleMass;
-                dataVel[idx] = 0; dataVel[idx+1] = 0; dataVel[idx+2] = 0; dataVel[idx+3] = 0;
-                continue; 
-            }
-
-            // --- STARS ---
-
-            // 1. Position: REMOVED THE GAP
-            // We removed the "+ 50.0" that was creating the hole.
-            // We use a power curve to make the center extremely dense (The Bulge).
-            const rRaw = Math.random();
-            const r = (rRaw * rRaw) * maxRadius + 2.0; // Minimal offset to prevent divide-by-zero
-            
-            const theta = Math.random() * Math.PI * 2;
-            
-            let x = r * Math.cos(theta);
-            let z = r * Math.sin(theta);
-            
-            // Thickness: The center is a ball (bulge), the edges are a disk.
-            // If distance is small, allow more Y height.
-            const bulgeFactor = 1.0 - (r / maxRadius);
-            const diskHeight = (r * 0.15);
-            const bulgeHeight = 150.0 * Math.pow(bulgeFactor, 10.0); // Spiky ball at center
-            
-            let y = (Math.random() - 0.5) * (diskHeight + bulgeHeight);
-
-            // 2. Mass
-            let mass = 0.5 + Math.random(); 
-
-            // 3. Velocity: SOFTENED GRAVITY
-            const G = 30.0;
-            const dist = Math.sqrt(x*x + y*y + z*z);
-            
-            // THE FIX: We add "+ 100.0" (Softening Parameter) to the divisor.
-            // This prevents velocity from going to infinity near the center.
-            // It effectively "caps" the top speed so stars stay in the core.
-            let orbitalSpeed = Math.sqrt((G * blackHoleMass) / (dist + 100.0));
-
-            orbitalSpeed *= 0.85; // Slightly elliptical
-
-            let vx = -Math.sin(theta) * orbitalSpeed;
-            let vz = Math.cos(theta) * orbitalSpeed;
-            let vy = 0;
-
-            // Random Thermal Motion (hotter in the center)
-            const chaos = 2.0 * (1.0 + bulgeFactor * 2.0);
-            vx += (Math.random() - 0.5) * chaos;
-            vy += (Math.random() - 0.5) * chaos;
-            vz += (Math.random() - 0.5) * chaos;
-
-            dataPos[idx] = x; dataPos[idx+1] = y; dataPos[idx+2] = z; dataPos[idx+3] = mass;
-            dataVel[idx] = vx; dataVel[idx+1] = vy; dataVel[idx+2] = vz; dataVel[idx+3] = 0;
-        }
-    } else if (mode === 'web' || mode === 'voids') {
-        // --- ALGORITHM: PROCEDURAL FILAMENTS & VOIDS ---
-        
-        // 1. Generate Structural Nodes (Galaxy Clusters)
-        const nodeCount = 40;
-        const nodes = [];
-        const nodeRadius = spread * 0.7;
-        for(let i=0; i<nodeCount; i++) {
-            nodes.push(randomPointInSphere(nodeRadius));
-        }
-
-        // 2. Generate Connectivity (Edges/Filaments)
-        // Simple nearest-neighbor graph to create web
-        const filaments = [];
-        for(let i=0; i<nodeCount; i++) {
-            // Connect to 2 or 3 nearest neighbors
-            const dists = nodes.map((n, idx) => ({ idx, dist: nodes[i].distanceTo(n) }));
-            dists.sort((a,b) => a.dist - b.dist);
-            // Connect to closest 2 (skipping self at 0)
-            for(let k=1; k<=3; k++) {
-                if (dists[k]) filaments.push({ start: nodes[i], end: nodes[dists[k].idx] });
-            }
-        }
-
-        for (let i = 0; i < PARTICLES; i++) {
-            let x, y, z, m, vx, vy, vz;
-            
-            const isBackround = Math.random() < 0.05; // 5% background radiation particles
-
-            if (isBackround && mode !== 'voids') {
-                const backgroundRadius = spread * 1.1;
-                const backgroundPos = randomPointInSphere(backgroundRadius);
-                x = backgroundPos.x;
-                y = backgroundPos.y;
-                z = backgroundPos.z;
-                m = 0.5; // Light
-                vx = vy = vz = 0;
-            } else {
-                // Select a filament
-                const fil = filaments[Math.floor(Math.random() * filaments.length)];
-                let t = Math.random();
-                
-                // Bias t towards the ends (clusters are denser)
-                if (Math.random() > 0.5) t = t * t; 
-                else t = 1 - (1-t)*(1-t);
-
-                // Base position on filament
-                let px = (1-t) * fil.start.x + t * fil.end.x;
-                let py = (1-t) * fil.start.y + t * fil.end.y;
-                let pz = (1-t) * fil.start.z + t * fil.end.z;
-
-                // Sine Wave Perturbation (Warp the straight lines)
-                // This makes them look like organic veins, not wires
-                const warpFreq = 0.005;
-                const warpAmp = 100.0;
-                px += Math.sin(py * warpFreq) * warpAmp;
-                py += Math.cos(pz * warpFreq) * warpAmp;
-                pz += Math.sin(px * warpFreq) * warpAmp;
-
-                // Thickness/Scatter
-                // Voids mode has thinner filaments
-                let thickness = (mode === 'voids' ? 40 : 100) * UNIVERSE_SCALE;
-                
-                // Density Function: Use noise to clump particles
-                // If noise is low, push particle further out (create gaps in filament)
-                const densityNoise = Math.sin(px*0.01) + Math.cos(py*0.013) + Math.sin(pz*0.007);
-                if (densityNoise < 0) thickness *= 3.0; // Puff out low density areas
-
-                // Gaussian scatter from the filament spine
-                const r = (Math.random() + Math.random() + Math.random()) / 3.0 * thickness;
-                const theta = Math.random() * Math.PI * 2;
-                const phi = Math.random() * Math.PI;
-
-                x = px + r * Math.sin(phi) * Math.cos(theta);
-                y = py + r * Math.sin(phi) * Math.sin(theta);
-                z = pz + r * Math.cos(phi);
-
-                // Mass depends on density
-                m = (1.0 - (r/thickness)) * 3.0;
-                if (m < 0.5) m = 0.5;
-
-                // Initial Velocity:
-                // 1. Flow along filament towards nearest node
-                const dirToStart = new THREE.Vector3().subVectors(fil.start, new THREE.Vector3(x,y,z)).normalize();
-                const dirToEnd = new THREE.Vector3().subVectors(fil.end, new THREE.Vector3(x,y,z)).normalize();
-                
-                const flowDir = (t < 0.5) ? dirToStart : dirToEnd;
-                const flowSpeed = Math.random() * 5.0;
-
-                vx = flowDir.x * flowSpeed;
-                vy = flowDir.y * flowSpeed;
-                vz = flowDir.z * flowSpeed;
-
-                // 2. Slight rotation around filament axis (Angular momentum)
-                // (Simplified as random perpendicular drift)
-                vx += (Math.random()-0.5) * 4.0;
-                vy += (Math.random()-0.5) * 4.0;
-                vz += (Math.random()-0.5) * 4.0;
-            }
-
-            const idx = i * 4;
-            dataPos[idx] = x; dataPos[idx+1] = y; dataPos[idx+2] = z; dataPos[idx+3] = m;
-            dataVel[idx] = vx; dataVel[idx+1] = vy; dataVel[idx+2] = vz; dataVel[idx+3] = 0;
-        }
-
-    } else if (mode === 'collision') {
-        // --- GALAXY COLLISION ---
-        for (let i = 0; i < PARTICLES; i++) {
-            let x, y, z, vx, vy, vz, m;
-            
-            // Galaxy 1 vs Galaxy 2
-            const isGal1 = i < PARTICLES/2;
-            const centerX = isGal1 ? -400 : 400;
-            const centerZ = isGal1 ? 0 : 0;
-            
-            // Spiral Arms Math
-            const armOffset = Math.random() * Math.PI * 2;
-            const dist = Math.random(); // 0 to 1
-            // Power law distribution for brighter core
-            const r = (dist * dist) * 500 + 10; 
-            
-            const arms = 3;
-            const angle = dist * Math.PI * 4 * arms + armOffset;
-
-            x = Math.cos(angle) * r;
-            z = Math.sin(angle) * r;
-            y = (Math.random()-0.5) * (r * 0.1); // Flattened disk
-
-            // Rotate Galaxy 2 to make collision messy
-            if (!isGal1) {
-                const tempZ = z;
-                z = y; 
-                y = tempZ; // Flip axis
-            }
-
-            x += centerX;
-            z += centerZ;
-
-            // Orbital Velocity (Sqrt for realistic falloff)
-            const vMag = Math.sqrt(15000 / (r + 10));
-            vx = -Math.sin(angle) * vMag;
-            vz = Math.cos(angle) * vMag;
-            vy = 0;
-
-            // Add collision velocity
-            if (isGal1) vx += 15; else vx -= 15;
-
-            // Randomize slightly
-            vx += (Math.random()-0.5); 
-            vy += (Math.random()-0.5); 
-            vz += (Math.random()-0.5);
-
-            m = (1.0 - dist) * 5.0 + 0.5; // Core is heavier
-            if (dist < 0.05) m = 50.0; // Supermassive black hole candidates
-
-            const idx = i * 4;
-            dataPos[idx] = x; dataPos[idx+1] = y; dataPos[idx+2] = z; dataPos[idx+3] = m;
-            dataVel[idx] = vx; dataVel[idx+1] = vy; dataVel[idx+2] = vz; dataVel[idx+3] = 0;
-        }
-    } else {
-        // --- GLOBULAR CLUSTER ---
-        for (let i = 0; i < PARTICLES; i++) {
-            // Gaussian Sphere
-            const theta = Math.random() * Math.PI * 2;
-            const phi = Math.acos(2 * Math.random() - 1);
-            const r = Math.pow(Math.random(), 1/3) * 600; // Uniform sphere
-
-            let x = r * Math.sin(phi) * Math.cos(theta);
-            let y = r * Math.sin(phi) * Math.sin(theta);
-            let z = r * Math.cos(phi);
-
-            let m = Math.random() * 2 + 0.5;
-            
-            // Initial Random Velocity (Thermal equilibrium)
-            let vx = (Math.random()-0.5) * 5;
-            let vy = (Math.random()-0.5) * 5;
-            let vz = (Math.random()-0.5) * 5;
-
-            const idx = i * 4;
-            dataPos[idx] = x; dataPos[idx+1] = y; dataPos[idx+2] = z; dataPos[idx+3] = m;
-            dataVel[idx] = vx; dataVel[idx+1] = vy; dataVel[idx+2] = vz; dataVel[idx+3] = 0;
-        }
-    }
+    texTreePos = new THREE.DataTexture(treeDataPosMass, NODE_TEX_WIDTH, NODE_TEX_WIDTH, THREE.RGBAFormat, THREE.FloatType);
+    texTreeInfo = new THREE.DataTexture(treeDataInfo, NODE_TEX_WIDTH, NODE_TEX_WIDTH, THREE.RGBAFormat, THREE.FloatType);
     
-    const texPos = new THREE.DataTexture(dataPos, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
-    texPos.needsUpdate = true;
-    const texVel = new THREE.DataTexture(dataVel, TEXTURE_WIDTH, TEXTURE_WIDTH, THREE.RGBAFormat, THREE.FloatType);
-    texVel.needsUpdate = true;
-    
-    const tmp = new THREE.MeshBasicMaterial({map:texPos});
-    const mesh = new THREE.Mesh(geometryQuad, tmp);
-    sceneSim.add(mesh);
-    renderer.setRenderTarget(fboPos1); renderer.render(sceneSim, cameraSim);
-    renderer.setRenderTarget(fboPos2); renderer.render(sceneSim, cameraSim);
-    tmp.map = texVel;
-    renderer.setRenderTarget(fboVel1); renderer.render(sceneSim, cameraSim);
-    renderer.setRenderTarget(fboVel2); renderer.render(sceneSim, cameraSim);
-    sceneSim.remove(mesh);
-    tmp.dispose(); texPos.dispose(); texVel.dispose();
-}
+    fboPos1 = new THREE.WebGLRenderTarget(TEXTURE_WIDTH, TEXTURE_WIDTH, { type: THREE.FloatType });
+    fboPos2 = fboPos1.clone();
+    fboVel1 = new THREE.WebGLRenderTarget(TEXTURE_WIDTH, TEXTURE_WIDTH, { type: THREE.FloatType });
+    fboVel2 = fboVel1.clone();
 
-function initMaterials() {
-    matPos = new THREE.ShaderMaterial({
-        uniforms: { texPos: {value:null}, texVel: {value:null}, delta: {value:0.0} },
-        vertexShader: vsPass, fragmentShader: fsPosition
-    });
-    matVel = new THREE.ShaderMaterial({
-        uniforms: { 
-            texPos: {value:null},
-            texVel: {value:null},
-            texGrid: {value:null},
-            texGridCoarse: {value:null},
-            delta: {value:0.0},
-            gravityConstant: {value: GRAVITY_CONSTANT * UNIVERSE_SCALE},
-            softening: {value: SOFTENING},
-            gridDim: {value:GRID_DIM},
-            gridTexWidth: {value:GRID_TEX_WIDTH},
-            gridCellSize: {value:GRID_CELL_SIZE},
-            coarseGridDim: {value:COARSE_GRID_DIM},
-            coarseGridTexWidth: {value:COARSE_GRID_TEX_WIDTH},
-            coarseGridCellSize: {value:COARSE_GRID_CELL_SIZE}
+    simScene = new THREE.Scene();
+    simCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+    quad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), new THREE.MeshBasicMaterial({map: tPos}));
+    simScene.add(quad);
+    
+    renderer.setRenderTarget(fboPos1); renderer.render(simScene, simCam);
+    quad.material.map = tVel;
+    renderer.setRenderTarget(fboVel1); renderer.render(simScene, simCam);
+
+    matVelUpdate = new THREE.ShaderMaterial({
+        uniforms: {
+            tPos: { value: null }, tVel: { value: null }, tTreePos: { value: texTreePos }, tTreeInfo: { value: texTreeInfo },
+            dt: { value: TIME_STEP }, theta: { value: THETA }, G: { value: GRAVITY }, softening: { value: SOFTENING },
+            treeTexDim: { value: new THREE.Vector2(NODE_TEX_WIDTH, NODE_TEX_WIDTH) }
         },
-        vertexShader: vsPass, fragmentShader: fsVelocity
+        vertexShader: vs, fragmentShader: fsUpdate
     });
-    matGrid = new THREE.ShaderMaterial({
-        uniforms: { texPos: {value:null}, gridDim: {value:GRID_DIM}, gridTexWidth: {value:GRID_TEX_WIDTH}, gridCellSize: {value:GRID_CELL_SIZE} },
-        vertexShader: vsAggregator, fragmentShader: fsAggregator, blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false
-    });
-    matGridCoarse = new THREE.ShaderMaterial({
-        uniforms: { texPos: {value:null}, gridDim: {value:COARSE_GRID_DIM}, gridTexWidth: {value:COARSE_GRID_TEX_WIDTH}, gridCellSize: {value:COARSE_GRID_CELL_SIZE} },
-        vertexShader: vsAggregator, fragmentShader: fsAggregator, blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false
-    });
-    matDisplay = new THREE.ShaderMaterial({
-        uniforms: { texPos: {value:null} },
-        vertexShader: vsVisual, fragmentShader: fsVisual, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
-    });
-}
 
-function initParticles() {
-    initData(simMode);
-    
-    const geo = new THREE.BufferGeometry();
-    const uvs = new Float32Array(PARTICLES * 3);
-    for (let i = 0; i < PARTICLES; i++) {
-        uvs[i*3] = (i % TEXTURE_WIDTH) / TEXTURE_WIDTH + (0.5/TEXTURE_WIDTH);
-        uvs[i*3+1] = Math.floor(i / TEXTURE_WIDTH) / TEXTURE_WIDTH + (0.5/TEXTURE_WIDTH);
-        uvs[i*3+2] = 0;
+    matPosUpdate = new THREE.ShaderMaterial({
+        uniforms: { tPos: { value: null }, tVel: { value: null }, dt: { value: TIME_STEP } },
+        vertexShader: vs, fragmentShader: fsPosUpdate
+    });
+
+    geom = new THREE.BufferGeometry();
+    const uvArr = new Float32Array(COUNT * 3);
+    for(let i=0; i<COUNT; i++) {
+        uvArr[i*3] = (i % TEXTURE_WIDTH) / TEXTURE_WIDTH + (0.5/TEXTURE_WIDTH);
+        uvArr[i*3+1] = Math.floor(i / TEXTURE_WIDTH) / TEXTURE_WIDTH + (0.5/TEXTURE_WIDTH);
     }
-    geo.setAttribute('position', new THREE.BufferAttribute(uvs, 3));
+    geom.setAttribute('position', new THREE.BufferAttribute(uvArr, 3));
+
+    matPoints = new THREE.ShaderMaterial({
+        uniforms: { tPos: { value: fboPos1.texture } },
+        vertexShader: vsParticles,
+        fragmentShader: fsParticles,
+        depthTest: false, blending: THREE.AdditiveBlending, transparent: true
+    });
     
-    sceneSim.add(new THREE.Mesh(geometryQuad, matPos)); 
-    gridPoints = new THREE.Points(geo, matGrid);
-    sceneGrid.add(gridPoints); 
-    const displayPoints = new THREE.Points(geo, matDisplay);
-    displayPoints.frustumCulled = false;
-    scene.add(displayPoints); 
-}
+    points = new THREE.Points(geom, matPoints);
+    points.frustumCulled = false; 
+    scene.add(points);
 
-function runPhysicsStep(deltaStep) {
-    renderer.setRenderTarget(fboGrid);
-    renderer.clearColor();
-    gridPoints.material = matGrid;
-    matGrid.uniforms.texPos.value = fboPos1.texture;
-    renderer.render(sceneGrid, cameraSim);
-
-    renderer.setRenderTarget(fboGridCoarse);
-    renderer.clearColor();
-    gridPoints.material = matGridCoarse;
-    matGridCoarse.uniforms.texPos.value = fboPos1.texture;
-    renderer.render(sceneGrid, cameraSim);
-    gridPoints.material = matGrid;
-
-    sceneSim.children[0].material = matVel;
-    matVel.uniforms.texPos.value = fboPos1.texture;
-    matVel.uniforms.texVel.value = fboVel1.texture;
-    matVel.uniforms.texGrid.value = fboGrid.texture;
-    matVel.uniforms.texGridCoarse.value = fboGridCoarse.texture;
-    matVel.uniforms.delta.value = deltaStep;
-    renderer.setRenderTarget(fboVel2);
-    renderer.render(sceneSim, cameraSim);
-    let swap = fboVel1; fboVel1 = fboVel2; fboVel2 = swap;
-
-    sceneSim.children[0].material = matPos;
-    matPos.uniforms.texPos.value = fboPos1.texture;
-    matPos.uniforms.texVel.value = fboVel1.texture;
-    matPos.uniforms.delta.value = deltaStep;
-    renderer.setRenderTarget(fboPos2);
-    renderer.render(sceneSim, cameraSim);
-    swap = fboPos1; fboPos1 = fboPos2; fboPos2 = swap;
-}
-
-function formatNumber(num) { return num.toLocaleString('en-US'); }
-
-function updateParticleCount(desiredCount) {
-    TEXTURE_WIDTH = Math.round(Math.sqrt(desiredCount));
-    PARTICLES = TEXTURE_WIDTH * TEXTURE_WIDTH;
-    document.getElementById('particleCount').textContent = formatNumber(PARTICLES);
-    document.getElementById('particleCountDisplay').textContent = formatNumber(PARTICLES);
-    reinitializeSimulation();
-}
-
-function reinitializeSimulation() {
-    if (fboPos1) fboPos1.dispose(); if (fboPos2) fboPos2.dispose();
-    if (fboVel1) fboVel1.dispose(); if (fboVel2) fboVel2.dispose();
-    if (fboGrid) fboGrid.dispose();
-    if (fboGridCoarse) fboGridCoarse.dispose();
+    document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+    document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
     
-    while(sceneSim.children.length > 0) sceneSim.remove(sceneSim.children[0]);
-    while(sceneGrid.children.length > 0) sceneGrid.remove(sceneGrid.children[0]);
-    for (let i = scene.children.length - 1; i >= 0; i--) {
-        const obj = scene.children[i];
-        if (obj.userData && obj.userData.persistent) continue;
-        scene.remove(obj);
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) obj.material.dispose();
+    loadingProgress.textContent = 'Complete!';
+    await new Promise(resolve => setTimeout(resolve, 200));
+    loadingScreen.classList.add('hidden');
+    
+    animate();
+}
+
+function buildTree() {
+    resetPool();
+    let minX=1e9, minY=1e9, minZ=1e9, maxX=-1e9, maxY=-1e9, maxZ=-1e9;
+    
+    for(let i=0; i<COUNT; i++) {
+        const x = poolPosX[i], y = poolPosY[i], z = poolPosZ[i];
+        if(x<minX) minX=x; if(x>maxX) maxX=x;
+        if(y<minY) minY=y; if(y>maxY) maxY=y;
+        if(z<minZ) minZ=z; if(z>maxZ) maxZ=z;
     }
     
-    initFBOs();
-    initParticles();
+    const midX = (minX+maxX)*0.5, midY = (minY+maxY)*0.5, midZ = (minZ+maxZ)*0.5;
+    const maxDim = Math.max(maxX-minX, maxY-minY, maxZ-minZ) * 1.05;
+    const half = maxDim * 0.5;
+    
+    const root = allocNode(midX-half, midY-half, midZ-half, midX+half, midY+half, midZ+half);
+    for(let i=0; i<COUNT; i++) insertParticle(root, poolPosX[i], poolPosY[i], poolPosZ[i], poolMass[i], 0);
+    updateTreeTexture();
 }
 
-function setupUI() {
-    document.getElementById('particleCount').textContent = formatNumber(PARTICLES);
-    document.getElementById('particleCountDisplay').textContent = formatNumber(PARTICLES);
-    document.getElementById('speed').addEventListener('input', e => simSpeed = parseFloat(e.target.value));
-    document.getElementById('configSelect').addEventListener('change', e => { simMode = e.target.value; initData(simMode); });
-    document.getElementById('resetBtn').addEventListener('click', () => { initData(simMode); });
-    document.getElementById('particleCountSlider').addEventListener('change', e => { updateParticleCount(parseInt(e.target.value)); });
+const keys = {};
+const moveSpeed = 300.0;
+function updateCamera(dt) {
+    if (!keys['w'] && !keys['s'] && !keys['a'] && !keys['d'] && !keys['q'] && !keys['e']) return;
+    controls.autoRotate = false; 
+    const dir = new THREE.Vector3();
+    const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+    const rgt = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+    const up = new THREE.Vector3(0,1,0);
     
-    // Video recording controls
-    const recordBtn = document.getElementById('recordBtn');
-    const durationInput = document.getElementById('recordingDuration');
-    const statusDiv = document.getElementById('recordingStatus');
+    if (keys['w']) dir.add(fwd);
+    if (keys['s']) dir.sub(fwd);
+    if (keys['a']) dir.sub(rgt);
+    if (keys['d']) dir.add(rgt);
+    if (keys['e']) dir.add(up);
+    if (keys['q']) dir.sub(up);
     
-    recordBtn.addEventListener('click', toggleRecording);
-    durationInput.addEventListener('input', e => {
-        if (!isRecording) {
-            recordingDuration = parseFloat(e.target.value) * 60; // Convert to seconds
+    if (dir.lengthSq() > 0) {
+        const speedMultiplier = keys['shift'] ? 10.0 : 1.0;
+        dir.normalize().multiplyScalar(moveSpeed * speedMultiplier * dt);
+        camera.position.add(dir);
+        controls.target.add(dir);
+    }
+}
+
+let frameCount = 0;
+let lastTime = 0;
+let isResetting = false; 
+
+function calculateMassCenter() {
+    let totalMass = 0;
+    let comX = 0, comY = 0, comZ = 0;
+    for(let i = 0; i < COUNT; i++) {
+        const mass = poolMass[i];
+        if (mass > 0) {
+            totalMass += mass;
+            comX += poolPosX[i] * mass;
+            comY += poolPosY[i] * mass;
+            comZ += poolPosZ[i] * mass;
         }
-    });
-    
-    // Initialize duration
-    recordingDuration = parseFloat(durationInput.value) * 60;
-
-    if (toggleUiBtn) {
-        toggleUiBtn.addEventListener('click', () => {
-            uiVisible = !uiVisible;
-            uiLayerElement.style.display = uiVisible ? 'block' : 'none';
-            toggleUiBtn.textContent = uiVisible ? 'Hide UI' : 'Show UI';
-            toggleUiBtn.setAttribute('aria-pressed', (!uiVisible).toString());
-        });
     }
+    if (totalMass > 0) {
+        return new THREE.Vector3(comX / totalMass, comY / totalMass, comZ / totalMass);
+    }
+    return new THREE.Vector3(0, 0, 0);
 }
 
-async function toggleRecording() {
-    if (isRecording) {
-        stopRecording();
-    } else {
-        await startRecording();
-    }
-}
-
-async function startRecording() {
-    try {
-        const canvas = renderer.domElement;
-        const stream = canvas.captureStream(30); // 30 FPS
-        
-        const options = {
-            mimeType: 'video/webm;codecs=vp9',
-            videoBitsPerSecond: 30000000 // 30 Mbps
-        };
-        
-        // Fallback to vp8 if vp9 is not supported
-        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-            options.mimeType = 'video/webm;codecs=vp8';
-        }
-        
-        // Final fallback
-        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-            options.mimeType = 'video/webm';
-        }
-        
-        mediaRecorder = new MediaRecorder(stream, options);
-        recordedChunks = [];
-        
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                recordedChunks.push(event.data);
-            }
-        };
-        
-        mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `astro3d-recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            isRecording = false;
-            updateRecordingUI();
-        };
-        
-        mediaRecorder.start();
-        isRecording = true;
-        recordingStartTime = performance.now();
-        
-        const durationInput = document.getElementById('recordingDuration');
-        recordingDuration = parseFloat(durationInput.value) * 60; // Convert minutes to seconds
-        
-        // Auto-stop after duration
-        recordingTimer = setTimeout(() => {
-            stopRecording();
-        }, recordingDuration * 1000);
-        
-        updateRecordingUI();
-    } catch (error) {
-        console.error('Error starting recording:', error);
-        alert('Failed to start recording: ' + error.message);
-        isRecording = false;
-        updateRecordingUI();
-    }
-}
-
-function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
-    }
-    if (recordingTimer) {
-        clearTimeout(recordingTimer);
-        recordingTimer = null;
-    }
-    updateRecordingUI();
-}
-
-function updateRecordingUI() {
-    const recordBtn = document.getElementById('recordBtn');
-    const durationInput = document.getElementById('recordingDuration');
-    const statusDiv = document.getElementById('recordingStatus');
-    
-    if (isRecording) {
-        recordBtn.textContent = 'Stop Recording';
-        recordBtn.classList.add('recording');
-        durationInput.disabled = true;
-        statusDiv.style.display = 'block';
-        
-        // Update status with remaining time
-        const updateStatus = () => {
-            if (!isRecording) return;
-            const elapsed = (performance.now() - recordingStartTime) / 1000;
-            const remaining = Math.max(0, recordingDuration - elapsed);
-            const minutes = Math.floor(remaining / 60);
-            const seconds = Math.floor(remaining % 60);
-            statusDiv.textContent = `Recording... ${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
-            if (isRecording) {
-                setTimeout(updateStatus, 1000);
-            }
-        };
-        updateStatus();
-    } else {
-        recordBtn.textContent = 'Start Recording';
-        recordBtn.classList.remove('recording');
-        durationInput.disabled = false;
-        statusDiv.style.display = 'none';
-        statusDiv.textContent = '';
-    }
-}
-
-function onResize() {
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-}
-
-function animate() {
+function animate(time) {
     requestAnimationFrame(animate);
-    const now = performance.now();
-    let dt = Math.min((now - lastTime) / 1000, 0.1);
-    lastTime = now;
-    
-    frames++;
-    if (now - stats.ms > 500) {
-        document.getElementById('fps').textContent = Math.round(frames * 1000 / (now - stats.ms)) + " FPS";
-        stats.ms = now; frames = 0;
-    }
+    if (isResetting) return;
 
-    if (simSpeed > 0) {
-        let remaining = dt * simSpeed;
-        let loops = 0;
-        while (remaining > 1e-6 && loops < 12) { // cap loops to prevent spiraling
-            const step = Math.min(remaining, MAX_PHYS_STEP);
-            runPhysicsStep(step);
-            remaining -= step;
-            loops++;
-        }
-    }
+    const dtSeconds = Math.min((time - lastTime) / 1000, 0.1);
+    lastTime = time;
+    if(frameCount % 20 === 0) document.getElementById('fpsDisplay').innerText = Math.round(1/dtSeconds);
 
-    renderer.setRenderTarget(null);
-    matDisplay.uniforms.texPos.value = fboPos1.texture;
+    const massCenter = calculateMassCenter();
+    const currentOffset = new THREE.Vector3().subVectors(camera.position, controls.target);
+    controls.target.copy(massCenter);
+    camera.position.copy(massCenter).add(currentOffset);
     
-    // Smooth Camera Movement
-    const boost = keys['shift'] ? CAMERA_SHIFT_MULT : 1.0;
-    const moveSpeed = 400 * dt * UNIVERSE_SCALE * boost;
-    const fwd = new THREE.Vector3(); 
-    camera.getWorldDirection(fwd);
-    const rgt = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
-    const up = new THREE.Vector3().crossVectors(rgt, fwd).normalize();
-    
-    if (keys['w']) camera.position.addScaledVector(fwd, moveSpeed);
-    if (keys['s']) camera.position.addScaledVector(fwd, -moveSpeed);
-    if (keys['a']) camera.position.addScaledVector(rgt, -moveSpeed);
-    if (keys['d']) camera.position.addScaledVector(rgt, moveSpeed);
-    
-    // Update controls target to follow camera movement
-    controls.target.copy(camera.position).addScaledVector(fwd, 100 * UNIVERSE_SCALE);
+    updateCamera(dtSeconds);
     controls.update();
 
-    if (starField) starField.rotation.y += STARFIELD_ROT_SPEED;
-    if (dustField) dustField.rotation.y -= DUST_ROT_SPEED;
-    
-    renderer.render(scene, camera);
+    if (TIME_STEP > 0) {
+        if (frameCount % TREE_UPDATE_INTERVAL === 0) {
+            renderer.readRenderTargetPixels(fboPos1, 0, 0, TEXTURE_WIDTH, TEXTURE_WIDTH, readBuffer);
+            for(let i=0; i<COUNT; i++) {
+                const i4 = i*4;
+                poolPosX[i] = readBuffer[i4]; poolPosY[i] = readBuffer[i4+1]; poolPosZ[i] = readBuffer[i4+2]; poolMass[i] = readBuffer[i4+3]; 
+            }
+            buildTree();
+        }
+
+        quad.material = matVelUpdate;
+        matVelUpdate.uniforms.tPos.value = fboPos1.texture;
+        matVelUpdate.uniforms.tVel.value = fboVel1.texture;
+        matVelUpdate.uniforms.dt.value = TIME_STEP;
+        renderer.setRenderTarget(fboVel2); renderer.render(simScene, simCam);
+        
+        let temp = fboVel1; fboVel1 = fboVel2; fboVel2 = temp;
+        
+        quad.material = matPosUpdate;
+        matPosUpdate.uniforms.tPos.value = fboPos1.texture;
+        matPosUpdate.uniforms.tVel.value = fboVel1.texture; 
+        matPosUpdate.uniforms.dt.value = TIME_STEP;
+        renderer.setRenderTarget(fboPos2); renderer.render(simScene, simCam);
+        
+        temp = fboPos1; fboPos1 = fboPos2; fboPos2 = temp;
+    }
+
+    scene.children[0].material.uniforms.tPos.value = fboPos1.texture;
+    composer.render();
+    frameCount++;
 }
+
+init();
 </script>
 </body>
 </html>
